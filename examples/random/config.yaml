@@ -1,0 +1,44 @@
+initializer: random
+
+environment:
+  coordinate_system: cartesian
+  grid_shape: [3, 5, 4]
+  cell_size: [1.e-2, 1.e-2, 1.e-2]
+  external_magnetic_field: [0, 0, 2.e-2]
+  external_electric_field: [2.e+4, 0, 0]
+  field_dtype: fp64
+  # valid_cell_coords: ../common/valid_cell_coords.npy
+
+grids:
+  -
+    species: electron
+    dtype:
+      X: fp32
+      U: fp32
+    n_splits: 2
+    n_computational_to_physical: 1.e+5
+    initial_condition:
+      n_particles: 1.e+3
+      avg_velocity: 3.e+6  # [m/s]
+
+      tracking:
+        n_particles: 20
+        sample: random
+
+  -
+    species: ion
+    dtype:
+      X: fp32
+      U: fp32
+    n_splits: 2
+    n_computational_to_physical: 1.e+5
+    initial_condition:
+      n_particles: 1.e+3
+      avg_velocity: 1.e+6
+
+      tracking:
+        n_particles: 20
+        sample: random
+
+simulation:
+  chunk_size: 1.e+6
