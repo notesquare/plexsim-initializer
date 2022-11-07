@@ -117,8 +117,9 @@ def add_temperature(cell_index, U, grid_T, grid_U, grid_N, weight, q, m):
 
                 c = 0
                 for m in range(3):
-                    c += math.pow(U[m] - grid_U[_i, _j, _k, m], 2)
-                t = c * m / q * weight[i][j][k]
+                    _c = (U[m] - grid_U[_i, _j, _k, m]) * weight[i][j][k]
+                    c += math.pow(_c, 2)
+                t = c * m / q
                 cuda.atomic.add(grid_T, (_i, _j, _k), t / n)
 
 

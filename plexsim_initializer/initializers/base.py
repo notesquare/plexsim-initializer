@@ -26,6 +26,7 @@ class BaseInitializer:
 
         self.grids_config = grids.copy()
         self.chunk_size = int(simulation.get('chunk_size', 1e6))
+        self.iteration_encoding = simulation.get('iteration_encoding', 'file')
 
         gilbert_curve = np.array(list(gilbert3d(*self.grid_shape)))
         valid_cells = _environment_config.get('valid_cell_coords')
@@ -58,7 +59,7 @@ class BaseInitializer:
 
     def serialize(self, out_fp):
         with h5py.File(out_fp, 'w') as h5f:
-            self.setup_root_attr(h5f)
+            self.setup_root_attr(h5f, out_fp)
             self.setup_base_path(h5f, iteration=0)
             self.setup_fields(h5f, iteration=0)
             self.setup_particles(h5f, out_fp, iteration=0)
@@ -78,11 +79,20 @@ class BaseInitializer:
             else:
                 h5_group.attrs[k] = v
 
-    def setup_root_attr(self, h5f):
+    def setup_root_attr(self, h5f, out_fp):
+        if self.iteration_encoding == 'file':
+            iteration_encoding = 'fileBased'
+            iteration_format = str(Path(out_fp.stem).with_suffix('.%T.h5'))
+        elif self.iteration_encoding == 'group':
+            iteration_encoding = 'groupBased'
+            iteration_format = '/cycles/%T/'
+        else:
+            raise ValueError()
+
         root_attrs = dict(
             basePath=b'/cycles/%T/',
-            iterationEncoding=b'groupBased',
-            iterationFormat=b'/cycles/%T/',
+            iterationEncoding=iteration_encoding,
+            iterationFormat=iteration_format,
             meshesPath=b'fields/',
             particlesPath=b'particles/',
             openPMD=b'1.0.0',
@@ -427,6 +437,8 @@ class BaseInitializer:
             n_computational_to_physical = int(
                 grid_config['n_computational_to_physical'])
             initial_condition = grid_config['initial_condition']
+            self.particles[grid_index]['n_computational_to_physical']\
+                = n_computational_to_physical
 
             if species == 'electron':
                 q = -1.602e-19
@@ -631,6 +643,8 @@ class BaseInitializer:
             C_idx = cp.array(grid_values['C_idx'])
             q = grid_values['q']
             m = grid_values['m']
+            n_computational_to_physical = \
+                grid_values['n_computational_to_physical']
 
             grid_n = cp.zeros((self.grid_shape + 1), dtype=np.float32)
             grid_N = cp.zeros((self.grid_shape + 1), dtype=np.int64)
@@ -641,6 +655,8 @@ class BaseInitializer:
 
             cp.divide(grid_n, grid_N, out=grid_n)
             grid_n = cp.nan_to_num(grid_n)
+            grid_n = grid_n / self.cell_size.prod()\
+                * n_computational_to_physical
 
             cp.divide(grid_U, cp.expand_dims(grid_N, axis=-1), out=grid_U)
             grid_U = cp.nan_to_num(grid_U)
