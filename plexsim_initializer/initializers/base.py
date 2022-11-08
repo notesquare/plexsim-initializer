@@ -57,14 +57,59 @@ class BaseInitializer:
     def load_relative_npy_file(self, fp):
         return np.load(self.input_base_path / fp)
 
-    def serialize(self, out_fp):
-        with h5py.File(out_fp, 'w') as h5f:
-            self.setup_root_attr(h5f, out_fp)
-            self.setup_base_path(h5f, iteration=0)
-            self.setup_fields(h5f, iteration=0)
-            self.setup_particles(h5f, out_fp, iteration=0)
-            self.setup_stats(h5f, iteration=0)
-            self.setup_state(h5f, iteration=0)
+    def serialize(self, out_fp, iteration=0, create_pmd_file=True):
+        out_fp = Path(out_fp)
+        init_out_fp = out_fp
+
+        if self.iteration_encoding == 'file':
+            if '%T' not in out_fp.name:
+                _suffix = out_fp.suffix
+                out_fp = out_fp.with_suffix(f'.%T{_suffix}')
+            init_out_fp = out_fp.parent / \
+                out_fp.name.replace('%T', f'{iteration}')
+
+            iteration_encoding = 'fileBased'
+            iteration_format = out_fp.name
+        elif self.iteration_encoding == 'group':
+            assert '%T' not in out_fp.name
+
+            iteration_encoding = 'groupBased'
+            iteration_format = '/cycles/%T/'
+        else:
+            raise ValueError()
+
+        with h5py.File(init_out_fp, 'w') as h5f:
+            self.setup_root_attr(h5f, iteration_encoding, iteration_format)
+            self.setup_base_path(h5f, iteration=iteration)
+            self.setup_fields(h5f, iteration=iteration)
+            self.setup_particles(h5f, iteration=iteration)
+            self.setup_stats(h5f, iteration=iteration)
+            self.setup_state(h5f, iteration=iteration)
+
+        if create_pmd_file:
+            if self.iteration_encoding == 'file':
+                # find appropriate name for pmd file
+                #   test_%T.h5 -> test.pmd
+                #   test.%T.h5 -> test.pmd
+                #   test%T.h5 -> test.pmd
+                pmd_fp = out_fp.name
+                pmd_fp = pmd_fp.replace('_%T', '')
+                pmd_fp = pmd_fp.replace('.%T', '')
+                pmd_fp = pmd_fp.replace('%T', '')
+
+                pmd_fp = (out_fp.parent / pmd_fp).with_suffix('.pmd')
+                if pmd_fp.is_file():
+                    print('pmd file already exists.')
+                    return
+                with open(pmd_fp, 'w') as f:
+                    f.write(f'{out_fp.name}\n')
+            elif self.iteration_encoding == 'group':
+                pmd_fp = out_fp.with_suffix('.pmd')
+                if pmd_fp.is_file():
+                    print('pmd file already exists.')
+                    return
+                with open(pmd_fp, 'w') as f:
+                    f.write(f'{out_fp.name}\n')
 
     def write_settings(self, h5_group, settings):
         for k, v in settings.items():
@@ -79,16 +124,7 @@ class BaseInitializer:
             else:
                 h5_group.attrs[k] = v
 
-    def setup_root_attr(self, h5f, out_fp):
-        if self.iteration_encoding == 'file':
-            iteration_encoding = 'fileBased'
-            iteration_format = str(Path(out_fp.stem).with_suffix('.%T.h5'))
-        elif self.iteration_encoding == 'group':
-            iteration_encoding = 'groupBased'
-            iteration_format = '/cycles/%T/'
-        else:
-            raise ValueError()
-
+    def setup_root_attr(self, h5f, iteration_encoding, iteration_format):
         root_attrs = dict(
             basePath=b'/cycles/%T/',
             iterationEncoding=iteration_encoding,
@@ -413,7 +449,7 @@ class BaseInitializer:
         grid_group['weighting'][:] = n_computational_to_physical
         self.write_settings(grid_group['weighting'], weighting_attrs)
 
-    def setup_particles(self, h5f, out_fp, iteration=0):
+    def setup_particles(self, h5f, iteration=0):
         particles_path = self.base_path(h5f, iteration) \
             + h5f.attrs['particlesPath'].encode('utf-8')
         particles = h5f.require_group(particles_path)
@@ -483,9 +519,10 @@ class BaseInitializer:
             self.write_particle_attrs(grid_index, grid_group, n_splits, q, m,
                                       axis_labels, n_computational_to_physical)
 
-            grid_fp = Path(out_fp).with_suffix(f'.g{grid_index}.h5')
+            out_fp = Path(h5f.filename)
+            grid_fp = out_fp.with_suffix(f'.g{grid_index}.h5')
             self.serialize_particles(grid_fp, grid_group, grid_index,
-                                     axis_labels)
+                                     axis_labels, iteration=iteration)
 
             # serialize tracking particles
             tracked_group = particles.require_group(f'{grid_index}_tracked')
@@ -527,7 +564,7 @@ class BaseInitializer:
             self.particles[grid_index]['kinetic_E'] = kinetic_E
 
     def serialize_particles(self, grid_fp, grid_group, grid_index,
-                            axis_labels):
+                            axis_labels, iteration=0):
         # serialize X, U
         X = self.particles[grid_index]['X'] +\
             self.particles[grid_index]['C_idx']
@@ -538,7 +575,7 @@ class BaseInitializer:
             _create_dataset_kwargs['chunks'] = (self.chunk_size,)
 
         with h5py.File(grid_fp, 'w') as h5f_g:
-            base_g = h5f_g.require_group('cycles/0')
+            base_g = h5f_g.require_group(f'cycles/{iteration}')
             for i, axis in enumerate(axis_labels):
                 # X
                 _path = f'position/{axis}'
