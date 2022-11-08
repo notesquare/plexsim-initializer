@@ -1,7 +1,22 @@
 import math
+from enum import Flag
 
+import numpy as np
 from numba import njit, float32
 from numba import cuda
+
+
+class SavedFlag(Flag):
+    empty = 0x0
+    particles = 0x1
+    fields = 0x2
+    tracked = 0x4
+    stats = 0x8
+    state = 0x10
+
+    @property
+    def value(self):
+        return np.uint8(super().value)
 
 
 # TODO: remove GPU dependency
