@@ -361,12 +361,12 @@ class BaseInitializer:
                           unitSI=1.
                           ) for axis in axis_labels}
         )
-        momentum_attrs = dict(
+        velocity_attrs = dict(
             macroWeighted=np.uint32(1),
             weightingPower=0.,
             timeOffset=0.,
             unitDimension=np.array(
-                [1, 1, -1, 0, 0, 0, 0], dtype=np.float64)
+                [1, 0, -1, 0, 0, 0, 0], dtype=np.float64)
         )
 
         return dict(
@@ -374,7 +374,7 @@ class BaseInitializer:
             mass=mass_attrs,
             position=position_attrs,
             positionOffset=offset_attrs,
-            momentum=momentum_attrs
+            velocity=velocity_attrs
         )
 
     def write_particle_attrs(self, grid_index, grid_group, n_splits, q, m,
@@ -589,7 +589,7 @@ class BaseInitializer:
                     np.float64(self.cell_size[i])
 
                 # U
-                _path = f'momentum/{axis}'
+                _path = f'velocity/{axis}'
                 src = base_g.create_dataset(_path, data=U[:, i],
                                             **_create_dataset_kwargs)
                 vs = h5py.VirtualSource(src)
@@ -625,7 +625,7 @@ class BaseInitializer:
                 np.float64(self.cell_size[i])
 
             # U
-            _path = f'momentum/{axis}'
+            _path = f'velocity/{axis}'
             track_U = U[list(particle_indices), i]
             tracked_group.create_dataset(_path, data=track_U,
                                          **self.create_dataset_kwargs)
@@ -668,12 +668,74 @@ class BaseInitializer:
 
         self.write_settings(stats_group, stats_attrs)
 
+    def write_state(self, fields_group, grid_index, axis_labels,
+                    grid_n, grid_U, grid_T):
+        n_attrs = dict(
+            geometry=b'cartesian',
+            gridSpacing=self.cell_size,
+            gridGlobalOffset=np.zeros(3, dtype=np.float64),
+            gridUnitSI=1.,
+            dataOrder=b'C',
+            axisLabels=np.array(axis_labels),
+            unitDimension=np.array(
+                [-3, 0, 0, 0, 0, 0, 0], dtype=np.float64),
+            fieldSmoothing=b'none',
+            timeOffset=0.,
+            position=np.array([0, 0, 0], dtype=np.float64),
+            unitSI=np.float64(1)
+        )
+        fields_group.create_dataset(f'{grid_index}_n', data=grid_n,
+                                    **self.create_dataset_kwargs)
+        self.write_settings(fields_group[f'{grid_index}_n'], n_attrs)
+
+        T_attrs = dict(
+            geometry=b'cartesian',
+            gridSpacing=self.cell_size,
+            gridGlobalOffset=np.zeros(3, dtype=np.float64),
+            gridUnitSI=1.,
+            dataOrder=b'C',
+            axisLabels=np.array(axis_labels),
+            unitDimension=np.array(
+                [2, 1, -3, -1, 0, 0, 0], dtype=np.float64),
+            fieldSmoothing=b'none',
+            timeOffset=0.,
+            position=np.array([0, 0, 0], dtype=np.float64),
+            unitSI=np.float64(1)
+        )
+        fields_group.create_dataset(f'{grid_index}_T', data=grid_T,
+                                    **self.create_dataset_kwargs)
+        self.write_settings(fields_group[f'{grid_index}_T'], T_attrs)
+
+        U_attrs = dict(
+            geometry=b'cartesian',
+            gridSpacing=self.cell_size,
+            gridGlobalOffset=np.zeros(3, dtype=np.float64),
+            gridUnitSI=1.,
+            dataOrder=b'C',
+            axisLabels=np.array(axis_labels),
+            unitDimension=np.array(
+                [1, 0, -1, 0, 0, 0, 0], dtype=np.float64),
+            fieldSmoothing=b'none',
+            timeOffset=0.,
+        )
+        U_group = fields_group.require_group(f'{grid_index}_U')
+        self.write_settings(fields_group[f'{grid_index}_U'], U_attrs)
+        for i, axis in enumerate(axis_labels):
+            U_group.create_dataset(axis, data=grid_U[..., i],
+                                   **self.create_dataset_kwargs)
+            U_group[axis].attrs['position'] = np.array([0, 0, 0],
+                                                       dtype=np.float64)
+            U_group[axis].attrs['unitSI'] = np.float64(1)
+
     def setup_state(self, h5f, iteration=0):
         # TODO: remove GPU dependency
         import cupy as cp
 
-        state_path = self.base_path(h5f, iteration) + b'state'
-        state_group = h5f.require_group(state_path)
+        fields_path = self.base_path(h5f, iteration) \
+            + h5f.attrs['meshesPath'].encode('utf-8')
+        fields_group = h5f.require_group(fields_path)
+
+        axis_labels = [b'x', b'y', b'z']
         for grid_index, grid_values in self.particles.items():
             X = cp.array(grid_values['X'])
             U = cp.array(grid_values['U'])
@@ -702,10 +764,6 @@ class BaseInitializer:
                 X, U, C_idx, grid_T, grid_U, grid_N, q, m
             )
 
-            _state_group = state_group.require_group(str(grid_index))
-            _state_group.create_dataset('n', data=cp.asnumpy(grid_n),
-                                        **self.create_dataset_kwargs)
-            _state_group.create_dataset('U', data=cp.asnumpy(grid_U),
-                                        **self.create_dataset_kwargs)
-            _state_group.create_dataset('T', data=cp.asnumpy(grid_T),
-                                        **self.create_dataset_kwargs)
+            self.write_state(
+                fields_group, grid_index, axis_labels, cp.asnumpy(grid_n),
+                cp.asnumpy(grid_U), cp.asnumpy(grid_T))
