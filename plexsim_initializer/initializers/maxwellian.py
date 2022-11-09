@@ -29,8 +29,6 @@ def distribute_maxwellian(C_idx, U, start_indices, end_indices,
 class MaxwellianInitializer(BaseInitializer):
     def load_particles(self, dtype_X, dtype_U, particles, grid_config):
         initial_condition = grid_config.get('initial_condition', {})
-        n_particles = initial_condition.get('n_particles', 0)
-        n_particles = int(n_particles)
 
         q = particles['q']
         m = particles['m']

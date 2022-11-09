@@ -161,3 +161,14 @@ def compute_grid_temperature(X, U, C_idx, grid_T, grid_U, grid_N, q, m):
     compute_grid_temperature_kernel[blockspergrid, threadsperblock](
         X, U, C_idx, grid_T, grid_U, grid_N, q, m
     )
+
+
+def remove_cycle_pattern_from_filename(fp):
+    # test_%T.h5 -> test.pmd
+    # test.%T.h5 -> test.pmd
+    # test%T.h5 -> test.pmd
+    name = fp.name
+    name = name.replace('_%T', '')
+    name = name.replace('.%T', '')
+    name = name.replace('%T', '')
+    return fp.parent / name

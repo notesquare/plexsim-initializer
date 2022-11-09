@@ -10,7 +10,8 @@ from ..lib.common import (
     is_in_grid,
     node_to_center_3d,
     compute_grid_velocity,
-    compute_grid_temperature
+    compute_grid_temperature,
+    remove_cycle_pattern_from_filename
 )
 
 
@@ -43,6 +44,8 @@ class BaseInitializer:
             compression='gzip', compression_opts=5
         )
 
+        self.particles = dict()
+
     @classmethod
     def load(cls, yaml_fp):
         _fp = Path(yaml_fp)
@@ -58,9 +61,8 @@ class BaseInitializer:
     def load_relative_npy_file(self, fp):
         return np.load(self.input_base_path / fp)
 
-    def serialize(self, out_fp, iteration=0, create_pmd_file=True):
+    def serialize(self, out_fp, iteration=0, create_pmd_file=True, t=None):
         out_fp = Path(out_fp)
-        init_out_fp = out_fp
 
         if self.iteration_encoding == 'file':
             if '%T' not in out_fp.name:
@@ -72,47 +74,47 @@ class BaseInitializer:
             iteration_encoding = 'fileBased'
             iteration_format = out_fp.name
         elif self.iteration_encoding == 'group':
-            assert '%T' not in out_fp.name
+            if '%T' in out_fp.name:
+                # remove the cycle pattern from the file name
+                out_fp = remove_cycle_pattern_from_filename(out_fp)
+            init_out_fp = out_fp
 
             iteration_encoding = 'groupBased'
             iteration_format = '/cycles/%T/'
         else:
-            raise ValueError()
+            raise ValueError(self.iteration_encoding)
 
         with h5py.File(init_out_fp, 'w') as h5f:
             flag = SavedFlag.empty
 
             self.setup_root_attr(h5f, iteration_encoding, iteration_format)
+            t and t.update()
             self.setup_base_path(h5f, iteration=iteration)
+            t and t.update()
             flag |= self.setup_fields(h5f, iteration=iteration)
+            t and t.update()
             flag |= self.setup_particles(h5f, iteration=iteration)
+            t and t.update()
             flag |= self.setup_stats(h5f, iteration=iteration)
+            t and t.update()
             flag != self.setup_state(h5f, iteration=iteration)
+            t and t.update()
 
             h5f.attrs['_saved'] = flag.value
 
         if create_pmd_file:
-            if self.iteration_encoding == 'file':
-                # find appropriate name for pmd file
-                #   test_%T.h5 -> test.pmd
-                #   test.%T.h5 -> test.pmd
-                #   test%T.h5 -> test.pmd
-                pmd_fp = out_fp.name
-                pmd_fp = pmd_fp.replace('_%T', '')
-                pmd_fp = pmd_fp.replace('.%T', '')
-                pmd_fp = pmd_fp.replace('%T', '')
+            _out_fp = remove_cycle_pattern_from_filename(out_fp)
+            pmd_fp = _out_fp.with_suffix('.pmd')
 
-                pmd_fp = (out_fp.parent / pmd_fp).with_suffix('.pmd')
-            elif self.iteration_encoding == 'group':
-                pmd_fp = out_fp.with_suffix('.pmd')
-            else:
-                return
-
-            if pmd_fp.is_file():
-                print(f'pmd file {pmd_fp.name} already exists.')
-                return
             with open(pmd_fp, 'w') as f:
                 f.write(f'{out_fp.name}\n')
+        t and t.close()
+
+        # print total number of particles
+        print('Number of particles generated:')
+        for grid_index, data in self.particles.items():
+            species = data['species']
+            print(f" {grid_index} ({species}) : {len(data['X']):,}")
 
     def write_settings(self, h5_group, settings):
         for k, v in settings.items():
@@ -391,11 +393,8 @@ class BaseInitializer:
         else:
             raise NotImplementedError(dimension)
 
-        self.particles = dict()
         tracking_start_id = 1
         for grid_index, grid_config in enumerate(self.grids_config):
-            self.particles[grid_index] = dict()
-
             # common vars
             species = grid_config['species']
             dtype = grid_config['dtype']
@@ -403,8 +402,11 @@ class BaseInitializer:
             n_computational_to_physical = int(
                 grid_config['n_computational_to_physical'])
             initial_condition = grid_config['initial_condition']
-            self.particles[grid_index]['n_computational_to_physical']\
-                = n_computational_to_physical
+
+            self.particles[grid_index] = dict(
+                species=species,
+                n_computational_to_physical=n_computational_to_physical
+            )
 
             if species == 'electron':
                 q = -1.602e-19
@@ -439,23 +441,24 @@ class BaseInitializer:
             # serialize particles
             grid_fp = out_fp.with_suffix(f'.g{grid_index}.h5')
             p_path = f'cycles/{iteration}/particles/{grid_index}'
-            with h5py.File(grid_fp, 'a') as grid_h5f:
+            with h5py.File(grid_fp, 'w') as grid_h5f:
                 p_group = grid_h5f.require_group(p_path)
                 particle_data = self.particles[grid_index]
                 self.write_particle_attrs(
                     p_group, particle_data, n_splits,
                     n_computational_to_physical)
                 self.serialize_particle(p_group, particle_data)
-            # create external link in
-            h5f[p_path] = h5py.ExternalLink(grid_fp, p_path)
 
-            # serialize tracking particles
-            n_track_particles = initial_condition.get('tracking', {}) \
-                .get('n_particles', 0)
-            if n_track_particles > 0:
-                p_path = f'cycles/{iteration}/particles/{grid_index}_tracked'
-                with h5py.File(grid_fp, 'a') as grid_h5f:
-                    tracked_group = grid_h5f.require_group(p_path)
+                # create external link in
+                h5f[p_path] = h5py.ExternalLink(grid_fp, p_path)
+
+                # serialize tracking particles
+                n_track_particles = initial_condition.get('tracking', {}) \
+                    .get('n_particles', 0)
+                if n_track_particles > 0:
+                    tracked_path = f'{p_path}_tracked'
+
+                    tracked_group = grid_h5f.require_group(tracked_path)
 
                     particle_data = self.particles[grid_index]
                     n_particles = particle_data['X'].shape[0]
@@ -495,12 +498,13 @@ class BaseInitializer:
                     self.serialize_particle(
                         tracked_group, particle_data,
                         tracking=(particle_indices, tracking_ids))
-                # create external link in
-                h5f[p_path] = h5py.ExternalLink(grid_fp, p_path)
+                    # create external link in
+                    h5f[tracked_path] = h5py.ExternalLink(grid_fp,
+                                                          tracked_path)
 
-                tracking_start_id += n_track_particles
+                    tracking_start_id += n_track_particles
 
-                flag |= SavedFlag.tracked
+                    flag |= SavedFlag.tracked
 
             # calculate and store kinetic_E
             U = self.particles[grid_index]['U']
