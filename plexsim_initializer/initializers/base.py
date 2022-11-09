@@ -752,8 +752,6 @@ class BaseInitializer:
 
             compute_grid_velocity(X, U, C_idx, grid_n, grid_U, grid_N)
 
-            cp.divide(grid_n, grid_N, out=grid_n)
-            grid_n = cp.nan_to_num(grid_n)
             grid_n = grid_n / self.cell_size.prod()\
                 * n_computational_to_physical
 
@@ -763,6 +761,9 @@ class BaseInitializer:
             compute_grid_temperature(
                 X, U, C_idx, grid_T, grid_U, grid_N, q, m
             )
+
+            cp.divide(grid_T, grid_N, out=grid_T)
+            grid_T = cp.nan_to_num(grid_T)
 
             self.write_state(
                 fields_group, grid_index, axis_labels, cp.asnumpy(grid_n),

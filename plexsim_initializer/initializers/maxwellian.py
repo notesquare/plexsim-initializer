@@ -22,7 +22,7 @@ def distribute_maxwellian(C_idx, U, start_indices, end_indices,
         sigma = np.sqrt(np.abs(q * t / m))
         for k in range(U.shape[1]):
             current_density = j_array[i, k]
-            mu = -current_density / (q * n)
+            mu = current_density / (q * n)
             U[start:end+1, k] = np.random.normal(mu, sigma, end - start + 1)
 
 
