@@ -547,11 +547,11 @@ class BaseInitializer:
 
         patches = h5_group.require_group('particlePatches')
         patches.create_dataset('numParticles',
-                               data=end_indices - start_indices + 1,
+                               data=end_p_indices - start_p_indices + 1,
                                dtype=np.uint64)
         patches['numParticles'].attrs['unitSI'] = 1.
         patches.create_dataset('numParticlesOffset',
-                               data=start_indices,
+                               data=start_p_indices,
                                dtype=np.uint64)
         patches['numParticlesOffset'].attrs['unitSI'] = 1.
 
