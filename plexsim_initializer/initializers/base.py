@@ -10,7 +10,6 @@ from ..lib.common import (
     is_in_grid,
     node_to_center_3d,
     compute_grid_velocity,
-    compute_grid_temperature,
     remove_cycle_pattern_from_filename
 )
 
@@ -727,7 +726,7 @@ class BaseInitializer:
                                                        dtype=np.float64)
             U_group[axis].attrs['unitSI'] = np.float64(1)
 
-    def setup_state(self, h5f, iteration=0):
+    def setup_state(self, h5f, iteration=0, density_threshold=1e-10):
         # TODO: remove GPU dependency
         import cupy as cp
 
@@ -746,24 +745,24 @@ class BaseInitializer:
                 grid_values['n_computational_to_physical']
 
             grid_n = cp.zeros((self.grid_shape + 1), dtype=np.float32)
-            grid_N = cp.zeros((self.grid_shape + 1), dtype=np.int64)
             grid_U = cp.zeros((*(self.grid_shape + 1), 3), dtype=np.float32)
-            grid_T = cp.zeros((self.grid_shape + 1), dtype=np.float32)
+            grid_U2 = cp.zeros((self.grid_shape + 1), dtype=np.float32)
 
-            compute_grid_velocity(X, U, C_idx, grid_n, grid_U, grid_N)
+            compute_grid_velocity(X, U, C_idx, grid_n, grid_U, grid_U2)
 
-            grid_n = grid_n / self.cell_size.prod()\
-                * n_computational_to_physical
+            mask = grid_n > density_threshold
+            cp.divide(grid_U[mask], cp.expand_dims(grid_n, axis=-1)[mask],
+                      out=grid_U[mask])
+            grid_U[~mask].fill(0)
+            cp.divide(grid_U2[mask], grid_n[mask], out=grid_U2[mask])
+            grid_U2[~mask].fill(0)
 
-            cp.divide(grid_U, cp.expand_dims(grid_N, axis=-1), out=grid_U)
-            grid_U = cp.nan_to_num(grid_U)
+            grid_U2 -= (grid_U * grid_U).sum(axis=-1)
 
-            compute_grid_temperature(
-                X, U, C_idx, grid_T, grid_U, grid_N, q, m
-            )
+            grid_T = grid_U2 * m / (3 * abs(q))
 
-            cp.divide(grid_T, grid_N, out=grid_T)
-            grid_T = cp.nan_to_num(grid_T)
+            grid_n = grid_n * n_computational_to_physical\
+                / self.cell_size.prod()
 
             self.write_state(
                 fields_group, grid_index, axis_labels, cp.asnumpy(grid_n),

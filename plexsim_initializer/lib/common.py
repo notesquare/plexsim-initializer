@@ -78,7 +78,7 @@ def weight_function(X):
 
 
 @cuda.jit
-def add_density_velocity(cell_index, U, grid_n, grid_U, grid_N, weight):
+def add_density_velocity(cell_index, U, grid_n, grid_U, grid_U2, weight):
     for i in range(2):
         for j in range(2):
             for k in range(2):
@@ -86,15 +86,17 @@ def add_density_velocity(cell_index, U, grid_n, grid_U, grid_N, weight):
                 _j = cell_index[1] + j
                 _k = cell_index[2] + k
 
-                cuda.atomic.add(grid_N, (_i, _j, _k), 1)
                 cuda.atomic.add(grid_n, (_i, _j, _k), weight[i][j][k])
+                _U2 = 0
                 for m in range(3):
                     cuda.atomic.add(grid_U, (_i, _j, _k, m),
                                     U[m] * weight[i][j][k])
+                    _U2 += U[m] * U[m]
+                cuda.atomic.add(grid_U2, (_i, _j, _k), _U2 * weight[i][j][k])
 
 
 @cuda.jit
-def compute_grid_velocity_kernel(X, U, C_idx, grid_n, grid_U, grid_N):
+def compute_grid_velocity_kernel(X, U, C_idx, grid_n, grid_U, grid_U2):
     i = cuda.grid(1)
     if i >= X.shape[0]:
         return
@@ -105,58 +107,16 @@ def compute_grid_velocity_kernel(X, U, C_idx, grid_n, grid_U, grid_N):
 
     weight = weight_function(X[i])
 
-    add_density_velocity(cell_index, U[i], grid_n, grid_U, grid_N, weight)
+    add_density_velocity(cell_index, U[i], grid_n, grid_U, grid_U2, weight)
 
 
-def compute_grid_velocity(X, U, C_idx, grid_n, grid_U, grid_N):
+def compute_grid_velocity(X, U, C_idx, grid_n, grid_U, grid_U2):
     if X.shape[0] == 0:
         return
     threadsperblock = 32
     blockspergrid = math.ceil(X.shape[0] / threadsperblock)
     compute_grid_velocity_kernel[blockspergrid, threadsperblock](
-        X, U, C_idx, grid_n, grid_U, grid_N
-    )
-
-
-@cuda.jit
-def add_temperature(cell_index, U, grid_T, grid_U, grid_N, weight, q, m):
-    for i in range(2):
-        for j in range(2):
-            for k in range(2):
-                _i = cell_index[0] + i
-                _j = cell_index[1] + j
-                _k = cell_index[2] + k
-
-                c = 0
-                for l in range(3):
-                    _c = (U[l] - grid_U[_i, _j, _k, l])
-                    c += math.pow(_c, 2) * weight[i][j][k]
-                t = abs(c * m / q)
-                cuda.atomic.add(grid_T, (_i, _j, _k), t)
-
-
-@cuda.jit
-def compute_grid_temperature_kernel(X, U, C_idx, grid_T, grid_U, grid_N, q, m):
-    i = cuda.grid(1)
-    if i >= X.shape[0]:
-        return
-
-    cell_index = C_idx[i]
-    if cell_index[0] == -1:
-        return
-
-    weight = weight_function(X[i])
-
-    add_temperature(cell_index, U[i], grid_T, grid_U, grid_N, weight, q, m)
-
-
-def compute_grid_temperature(X, U, C_idx, grid_T, grid_U, grid_N, q, m):
-    if X.shape[0] == 0:
-        return
-    threadsperblock = 32
-    blockspergrid = math.ceil(X.shape[0] / threadsperblock)
-    compute_grid_temperature_kernel[blockspergrid, threadsperblock](
-        X, U, C_idx, grid_T, grid_U, grid_N, q, m
+        X, U, C_idx, grid_n, grid_U, grid_U2
     )
 
 
