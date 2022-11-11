@@ -1,4 +1,5 @@
 from pathlib import Path
+from datetime import datetime
 
 import yaml
 import h5py
@@ -26,6 +27,26 @@ class BaseInitializer:
         self.input_base_path = input_base_path
 
         self.grids_config = grids.copy()
+
+        # find appropriate particle name per each particle
+        n_grids_per_species = {}
+        for grid_config in self.grids_config:
+            species = grid_config['species']
+            n_grids_per_species.setdefault(species, 0)
+            n_grids_per_species[species] += 1
+        n_grids_per_species = {
+            species: list(reversed(range(n)))
+            for species, n in n_grids_per_species.items()
+            if n > 1
+        }
+        for grid_config in self.grids_config:
+            species = grid_config['species']
+            if len(n_grids_per_species.get(species, [])) > 0:
+                v = n_grids_per_species[species].pop()
+                grid_config['name'] = f'{species}_{v+1}'
+            else:
+                grid_config['name'] = species
+
         self.chunk_size = int(simulation.get('chunk_size', 1e6))
         self.iteration_encoding = simulation.get('iteration_encoding', 'file')
 
@@ -60,7 +81,8 @@ class BaseInitializer:
     def load_relative_npy_file(self, fp):
         return np.load(self.input_base_path / fp)
 
-    def serialize(self, out_fp, iteration=0, create_pmd_file=True, t=None):
+    def serialize(self, out_fp, iteration=0, create_pmd_file=True,
+                  author='nobody', t=None):
         out_fp = Path(out_fp)
 
         if self.iteration_encoding == 'file':
@@ -79,14 +101,15 @@ class BaseInitializer:
             init_out_fp = out_fp
 
             iteration_encoding = 'groupBased'
-            iteration_format = '/cycles/%T/'
+            iteration_format = '/data/%T/'
         else:
             raise ValueError(self.iteration_encoding)
 
         with h5py.File(init_out_fp, 'w') as h5f:
             flag = SavedFlag.empty
 
-            self.setup_root_attr(h5f, iteration_encoding, iteration_format)
+            self.setup_root_attr(h5f, iteration_encoding, iteration_format,
+                                 author=author)
             t and t.update()
             self.setup_base_path(h5f, iteration=iteration)
             t and t.update()
@@ -128,16 +151,21 @@ class BaseInitializer:
             else:
                 h5_group.attrs[k] = v
 
-    def setup_root_attr(self, h5f, iteration_encoding, iteration_format):
+    def setup_root_attr(self, h5f, iteration_encoding, iteration_format,
+                        author='nobody'):
+        current_dt = datetime.now().astimezone()
         root_attrs = dict(
-            basePath=b'/cycles/%T/',
-            iterationEncoding=iteration_encoding,
-            iterationFormat=iteration_format,
-            meshesPath=b'fields/',
-            particlesPath=b'particles/',
-            openPMD=b'1.0.0',
+            basePath=np.string_('/data/%T/'),
+            author=np.string_(author),
+            date=np.string_(current_dt.strftime('%Y-%m-%d %H:%M:%S %z')),
+            iterationEncoding=np.string_(iteration_encoding),
+            iterationFormat=np.string_(iteration_format),
+            meshesPath=np.string_('fields/'),
+            particlesPath=np.string_('particles/'),
+            openPMD=np.string_('1.1.0'),
             openPMDextension=np.uint32(1),
-            software=b'PLEXsim',
+            software=np.string_('PLEXsim Initializer'),
+            softwareVersion=np.string_('1')
         )
 
         self.write_settings(h5f, root_attrs)
@@ -155,7 +183,7 @@ class BaseInitializer:
 
     def base_path(self, h5f, iteration):
         return np.string_(h5f.attrs['basePath']).replace(
-            b'%T', str(iteration).encode('utf-8'))
+            b'%T', np.string_(str(iteration)))
 
     def setup_base_path(self, h5f, iteration=0, delta_time=1):
         base_path = self.base_path(h5f, iteration)
@@ -190,17 +218,17 @@ class BaseInitializer:
 
     def setup_fields(self, h5f, iteration=0):
         fields_path = self.base_path(h5f, iteration) \
-            + h5f.attrs['meshesPath'].encode('utf-8')
+            + np.string_(h5f.attrs['meshesPath'])
         fields = h5f.require_group(fields_path)
 
         dimension = len(self.grid_shape)
 
         fields_attrs = dict(
-            fieldSolver=b'none',
-            fieldBoundary=np.full(2 * dimension, b"open"),
-            particleBoundary=np.full(2 * dimension, b"absorbing"),
-            currentSmoothing=b'none',
-            chargeCorrection=b'none'
+            fieldSolver=np.string_('none'),
+            fieldBoundary=np.full(2 * dimension, np.string_('open')),
+            particleBoundary=np.full(2 * dimension, np.string_('absorbing')),
+            currentSmoothing=np.string_('none'),
+            chargeCorrection=np.string_('none')
         )
 
         self.write_settings(fields, fields_attrs)
@@ -228,24 +256,24 @@ class BaseInitializer:
         return SavedFlag.fields
 
     def write_B(self, fields_group, B, field_dtype):
-        B_group = fields_group.require_group(b'B')
+        B_group = fields_group.require_group(np.string_('B'))
 
         dimension = len(self.grid_shape)
         if dimension == 3:
-            axis_labels = [b'x', b'y', b'z']
+            axis_labels = [np.string_(v) for v in ['x', 'y', 'z']]
         else:
             raise NotImplementedError()
 
         B_attrs = dict(
-            geometry=b'cartesian',
+            geometry=np.string_('cartesian'),
             gridSpacing=self.cell_size,
             gridGlobalOffset=np.zeros(dimension, dtype=np.float64),
-            gridUnitSI=1.,
-            dataOrder=b'C',
+            gridUnitSI=np.float64(1),
+            dataOrder=np.string_('C'),
             axisLabels=np.array(axis_labels),
             unitDimension=np.array(
                 [0, 1, -2, -1, 0, 0, 0], dtype=np.float64),
-            fieldSmoothing=b'none',
+            fieldSmoothing=np.string_('none'),
             timeOffset=0.
         )
 
@@ -257,27 +285,27 @@ class BaseInitializer:
                                    **self.create_dataset_kwargs)
             B_group[axis].attrs['position'] = np.zeros(
                 dimension, dtype=field_dtype)
-            B_group[axis].attrs['unitSI'] = 1.
+            B_group[axis].attrs['unitSI'] = np.float64(1)
 
     def write_E(self, fields_group, E, field_dtype):
-        E_group = fields_group.require_group(b'E')
+        E_group = fields_group.require_group(np.string_('E'))
 
         dimension = len(self.grid_shape)
         if dimension == 3:
-            axis_labels = [b'x', b'y', b'z']
+            axis_labels = [np.string_(v) for v in ['x', 'y', 'z']]
         else:
             raise NotImplementedError()
 
         E_attrs = dict(
-            geometry=b'cartesian',
+            geometry=np.string_('cartesian'),
             gridSpacing=self.cell_size,
             gridGlobalOffset=np.zeros(dimension, dtype=np.float64),
-            gridUnitSI=1.,
-            dataOrder=b'C',
+            gridUnitSI=np.float64(1),
+            dataOrder=np.string_('C'),
             axisLabels=np.array(axis_labels),
             unitDimension=np.array(
                 [1, 1, -3, -1, 0, 0, 0], dtype=np.float64),
-            fieldSmoothing=b'none',
+            fieldSmoothing=np.string_('none'),
             timeOffset=0.
         )
 
@@ -289,7 +317,7 @@ class BaseInitializer:
                                    **self.create_dataset_kwargs)
             E_group[axis].attrs['position'] = np.zeros(
                 dimension, dtype=field_dtype)
-            E_group[axis].attrs['unitSI'] = 1.
+            E_group[axis].attrs['unitSI'] = np.float64(1)
 
     def load_particles(self, dtype_X, dtype_U, particles, grid_config):
         raise NotImplementedError()
@@ -335,9 +363,8 @@ class BaseInitializer:
             macroWeighted=np.uint32(1),
             weightingPower=1.,
             timeOffset=0.,
-            unitSI=1.,
-            unitDimension=np.array(
-                [0, 0, 1, 1, 0, 0, 0], dtype=np.float64)
+            unitSI=np.float64(1),
+            unitDimension=np.array([0, 0, 1, 1, 0, 0, 0], dtype=np.float64)
         )
         mass_attrs = dict(
             value=m,
@@ -345,34 +372,37 @@ class BaseInitializer:
             macroWeighted=np.uint32(1),
             weightingPower=1.,
             timeOffset=0.,
-            unitSI=1.,
-            unitDimension=np.array(
-                [0, 1, 0, 0, 0, 0, 0], dtype=np.float64)
+            unitSI=np.float64(1),
+            unitDimension=np.array([0, 1, 0, 0, 0, 0, 0], dtype=np.float64)
         )
         position_attrs = dict(
             macroWeighted=np.uint32(1),
             weightingPower=0.,
             timeOffset=0.,
-            unitDimension=np.array(
-                [1, 0, 0, 0, 0, 0, 0], dtype=np.float64)
+            unitDimension=np.array([1, 0, 0, 0, 0, 0, 0], dtype=np.float64)
         )
         offset_attrs = dict(
             macroWeighted=np.uint32(1),
             weightingPower=0.,
             timeOffset=0.,
-            unitDimension=np.array(
-                [1, 0, 0, 0, 0, 0, 0], dtype=np.float64),
-            **{axis: dict(value=np.float32(0),
-                          shape=np.array([n_particles], dtype=np.uint64),
-                          unitSI=1.
-                          ) for axis in axis_labels}
+            unitDimension=np.array([1, 0, 0, 0, 0, 0, 0], dtype=np.float64),
+            **{axis: dict(
+                value=np.float32(0),
+                shape=np.array([n_particles], dtype=np.uint64),
+                unitSI=np.float64(1)
+            ) for axis in axis_labels}
         )
-        velocity_attrs = dict(
+        # velocity_attrs = dict(
+        #     macroWeighted=np.uint32(1),
+        #     weightingPower=0.,
+        #     timeOffset=0.,
+        #     unitDimension=np.array([1, 0, -1, 0, 0, 0, 0], dtype=np.float64),
+        # )
+        momentum_attrs = dict(
             macroWeighted=np.uint32(1),
             weightingPower=0.,
             timeOffset=0.,
-            unitDimension=np.array(
-                [1, 0, -1, 0, 0, 0, 0], dtype=np.float64)
+            unitDimension=np.array([1, 1, -1, 0, 0, 0, 0], dtype=np.float64),
         )
 
         return dict(
@@ -380,7 +410,8 @@ class BaseInitializer:
             mass=mass_attrs,
             position=position_attrs,
             positionOffset=offset_attrs,
-            velocity=velocity_attrs
+            # velocity=velocity_attrs,
+            momentum=momentum_attrs
         )
 
     def setup_particles(self, h5f, iteration=0):
@@ -439,9 +470,15 @@ class BaseInitializer:
 
             # serialize particles
             grid_fp = out_fp.with_suffix(f'.g{grid_index}.h5')
-            p_path = f'cycles/{iteration}/particles/{grid_index}'
+            particle_name = grid_config['name']
+
+            p_path = f'data/{iteration}/particles/{particle_name}'
             with h5py.File(grid_fp, 'w') as grid_h5f:
                 p_group = grid_h5f.require_group(p_path)
+                # custom attribute
+                p_group.attrs['_gridIndex'] = grid_index
+                p_group.attrs['_tracked'] = 0
+
                 particle_data = self.particles[grid_index]
                 self.write_particle_attrs(
                     p_group, particle_data, n_splits,
@@ -458,6 +495,9 @@ class BaseInitializer:
                     tracked_path = f'{p_path}_tracked'
 
                     tracked_group = grid_h5f.require_group(tracked_path)
+                    # custom attribute
+                    tracked_group.attrs['_gridIndex'] = grid_index
+                    tracked_group.attrs['_tracked'] = 1
 
                     particle_data = self.particles[grid_index]
                     n_particles = particle_data['X'].shape[0]
@@ -466,10 +506,10 @@ class BaseInitializer:
                         n_track_particles, q, m, axis_labels)
                     tracked_attrs.update(dict(
                         particleShape=3.0,
-                        currentDeposition=b'none',
-                        particlePush=b'Boris',
-                        particleInterpolation=b'uniform',
-                        particleSmoothing=b'none'))
+                        currentDeposition=np.string_('none'),
+                        particlePush=np.string_('Boris'),
+                        particleInterpolation=np.string_('uniform'),
+                        particleSmoothing=np.string_('none')))
 
                     self.write_settings(tracked_group, tracked_attrs)
 
@@ -477,7 +517,7 @@ class BaseInitializer:
                         macroWeighted=np.uint32(1),
                         weightingPower=1.,
                         timeOffset=0.,
-                        unitSI=1.,
+                        unitSI=np.float64(1),
                         unitDimension=np.array(
                             [0, 0, 0, 0, 0, 0, 0], dtype=np.float64)
                     )
@@ -535,10 +575,10 @@ class BaseInitializer:
 
         grid_attrs = dict(
             particleShape=3.0,
-            currentDeposition=b'none',
-            particlePush=b'Boris',
-            particleInterpolation=b'uniform',
-            particleSmoothing=b'none',
+            currentDeposition=np.string_('none'),
+            particlePush=np.string_('Boris'),
+            particleInterpolation=np.string_('uniform'),
+            particleSmoothing=np.string_('none'),
             **particles_attrs,
             _startIndices=start_indices,
             _endIndices=end_indices,
@@ -552,18 +592,19 @@ class BaseInitializer:
         patches.create_dataset('numParticles',
                                data=end_p_indices - start_p_indices + 1,
                                dtype=np.uint64)
-        patches['numParticles'].attrs['unitSI'] = 1.
+        patches['numParticles'].attrs['unitSI'] = np.float64(1)
         patches.create_dataset('numParticlesOffset',
                                data=start_p_indices,
                                dtype=np.uint64)
-        patches['numParticlesOffset'].attrs['unitSI'] = 1.
+        patches['numParticlesOffset'].attrs['unitSI'] = np.float64(1)
 
         patches.require_group('offset')
         patches['offset'].attrs['unitDimension'] = np.array(
             [1, 0, 0, 0, 0, 0, 0], dtype=np.float64)
         for i, axis in enumerate(axis_labels):
             patches['offset'].create_dataset(axis, data=np.full(n_splits, 0.))
-            patches[f'offset/{axis}'].attrs['unitSI'] = self.cell_size[i]
+            patches[f'offset/{axis}'].attrs['unitSI'] = \
+                np.float64(self.cell_size[i])
 
         patches.require_group('extent')
         patches['extent'].attrs['unitDimension'] = np.array(
@@ -571,13 +612,14 @@ class BaseInitializer:
         for i, axis in enumerate(axis_labels):
             patches['extent'].create_dataset(
                 axis, data=np.full(n_splits, self.grid_shape[i]))
-            patches[f'extent/{axis}'].attrs['unitSI'] = self.cell_size[i]
+            patches[f'extent/{axis}'].attrs['unitSI'] = \
+                np.float64(self.cell_size[i])
 
         weighting_attrs = dict(
             macroWeighted=np.uint32(1),
             weightingPower=1.,
             timeOffset=0.,
-            unitSI=1.,
+            unitSI=np.float64(1),
             unitDimension=np.array(
                 [0, 0, 0, 0, 0, 0, 0], dtype=np.float64)
         )
@@ -600,6 +642,15 @@ class BaseInitializer:
             h5_group.attrs['_particleIndices'] = particle_indices
 
             h5_group.create_dataset('id', data=tracking_ids)
+            id_attr = dict(
+                unitSI=np.float64(1),
+                macroWeighted=np.uint32(1),
+                timeOffset=np.float64(0),
+                unitDimension=np.zeros(7, dtype=np.float64),
+                weightingPower=np.float64(0)
+            )
+            self.write_settings(h5_group['id'], id_attr)
+
             X = X[list(particle_indices)]
             U = U[list(particle_indices)]
 
@@ -619,14 +670,19 @@ class BaseInitializer:
             h5_group.create_dataset(_path, data=X[:, i],
                                     **_create_dataset_kwargs)
 
-            h5_group[_path].attrs['unitSI'] = \
-                np.float64(self.cell_size[i])
+            h5_group[_path].attrs['unitSI'] = np.float64(self.cell_size[i])
 
             # U
-            _path = f'velocity/{axis}'
+            # _path = f'velocity/{axis}'
+            # h5_group.create_dataset(_path, data=U[:, i],
+            #                         **_create_dataset_kwargs)
+            # h5_group[_path].attrs['unitSI'] = np.float64(1)
+
+            # velocity is saved as momentum (required by openPMD)
+            _path = f'momentum/{axis}'
             h5_group.create_dataset(_path, data=U[:, i],
                                     **_create_dataset_kwargs)
-            h5_group[_path].attrs['unitSI'] = np.float64(1)
+            h5_group[_path].attrs['unitSI'] = np.float64(particle_data['m'])
 
     @property
     def field_E(self, permeability=1.257e-6, permittivity=8.854e-12):
@@ -652,7 +708,7 @@ class BaseInitializer:
             n_particles.append(grid['X'].shape[0])
             kinetic_E.append(grid['kinetic_E'])
 
-        stats_path = self.base_path(h5f, iteration) + b'stats'
+        stats_path = self.base_path(h5f, iteration) + np.string_('stats')
         stats_group = h5f.require_group(stats_path)
 
         stats_attrs = dict(
@@ -670,15 +726,15 @@ class BaseInitializer:
     def write_state(self, fields_group, grid_index, axis_labels,
                     grid_n, grid_U, grid_T):
         n_attrs = dict(
-            geometry=b'cartesian',
+            geometry=np.string_('cartesian'),
             gridSpacing=self.cell_size,
             gridGlobalOffset=np.zeros(3, dtype=np.float64),
-            gridUnitSI=1.,
-            dataOrder=b'C',
+            gridUnitSI=np.float64(1),
+            dataOrder=np.string_('C'),
             axisLabels=np.array(axis_labels),
             unitDimension=np.array(
                 [-3, 0, 0, 0, 0, 0, 0], dtype=np.float64),
-            fieldSmoothing=b'none',
+            fieldSmoothing=np.string_('none'),
             timeOffset=0.,
             position=np.array([0, 0, 0], dtype=np.float64),
             unitSI=np.float64(1)
@@ -688,15 +744,15 @@ class BaseInitializer:
         self.write_settings(fields_group[f'{grid_index}_n'], n_attrs)
 
         T_attrs = dict(
-            geometry=b'cartesian',
+            geometry=np.string_('cartesian'),
             gridSpacing=self.cell_size,
             gridGlobalOffset=np.zeros(3, dtype=np.float64),
-            gridUnitSI=1.,
-            dataOrder=b'C',
+            gridUnitSI=np.float64(1),
+            dataOrder=np.string_('C'),
             axisLabels=np.array(axis_labels),
             unitDimension=np.array(
                 [2, 1, -3, -1, 0, 0, 0], dtype=np.float64),
-            fieldSmoothing=b'none',
+            fieldSmoothing=np.string_('none'),
             timeOffset=0.,
             position=np.array([0, 0, 0], dtype=np.float64),
             unitSI=np.float64(1)
@@ -706,15 +762,15 @@ class BaseInitializer:
         self.write_settings(fields_group[f'{grid_index}_T'], T_attrs)
 
         U_attrs = dict(
-            geometry=b'cartesian',
+            geometry=np.string_('cartesian'),
             gridSpacing=self.cell_size,
             gridGlobalOffset=np.zeros(3, dtype=np.float64),
-            gridUnitSI=1.,
-            dataOrder=b'C',
+            gridUnitSI=np.float64(1),
+            dataOrder=np.string_('C'),
             axisLabels=np.array(axis_labels),
             unitDimension=np.array(
                 [1, 0, -1, 0, 0, 0, 0], dtype=np.float64),
-            fieldSmoothing=b'none',
+            fieldSmoothing=np.string_('none'),
             timeOffset=0.,
         )
         U_group = fields_group.require_group(f'{grid_index}_U')
@@ -731,10 +787,10 @@ class BaseInitializer:
         import cupy as cp
 
         fields_path = self.base_path(h5f, iteration) \
-            + h5f.attrs['meshesPath'].encode('utf-8')
+            + np.string_(h5f.attrs['meshesPath'])
         fields_group = h5f.require_group(fields_path)
 
-        axis_labels = [b'x', b'y', b'z']
+        axis_labels = [np.string_(v) for v in ['x', 'y', 'z']]
         for grid_index, grid_values in self.particles.items():
             X = cp.array(grid_values['X'])
             U = cp.array(grid_values['U'])

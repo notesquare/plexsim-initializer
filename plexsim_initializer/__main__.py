@@ -23,6 +23,7 @@ if __name__ == '__main__':
 
     parser.add_argument('init_config_file', type=Path)
     parser.add_argument('out_file', type=Path)
+    parser.add_argument('--author', type=str, default='unspecified')
     args = parser.parse_args()
 
     input_fp = args.init_config_file
@@ -57,4 +58,4 @@ if __name__ == '__main__':
         sys.exit(1)
 
     t.update()
-    init.serialize(out_fp, t=t)
+    init.serialize(out_fp, author=args.author, t=t)
