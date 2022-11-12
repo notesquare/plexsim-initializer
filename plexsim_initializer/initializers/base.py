@@ -122,7 +122,10 @@ class BaseInitializer:
             flag != self.setup_state(h5f, iteration=iteration)
             t and t.update()
 
-            h5f.attrs['_saved'] = flag.value
+            if self.iteration_encoding == 'file':
+                h5f.attrs['_saved'] = flag.value
+            else:
+                h5f[f'data/{iteration}'].attrs['_saved'] = flag.value
 
         if create_pmd_file:
             _out_fp = remove_cycle_pattern_from_filename(out_fp)
@@ -392,12 +395,6 @@ class BaseInitializer:
                 unitSI=np.float64(1)
             ) for axis in axis_labels}
         )
-        # velocity_attrs = dict(
-        #     macroWeighted=np.uint32(1),
-        #     weightingPower=0.,
-        #     timeOffset=0.,
-        #     unitDimension=np.array([1, 0, -1, 0, 0, 0, 0], dtype=np.float64),
-        # )
         momentum_attrs = dict(
             macroWeighted=np.uint32(1),
             weightingPower=0.,
@@ -410,7 +407,6 @@ class BaseInitializer:
             mass=mass_attrs,
             position=position_attrs,
             positionOffset=offset_attrs,
-            # velocity=velocity_attrs,
             momentum=momentum_attrs
         )
 
@@ -435,6 +431,7 @@ class BaseInitializer:
 
             self.particles[grid_index] = dict(
                 species=species,
+                particle_name=grid_config['name'],
                 n_computational_to_physical=n_computational_to_physical
             )
 
@@ -723,7 +720,7 @@ class BaseInitializer:
 
         return SavedFlag.stats
 
-    def write_state(self, fields_group, grid_index, axis_labels,
+    def write_state(self, fields_group, particle_name, axis_labels,
                     grid_n, grid_U, grid_T):
         n_attrs = dict(
             geometry=np.string_('cartesian'),
@@ -739,9 +736,9 @@ class BaseInitializer:
             position=np.array([0, 0, 0], dtype=np.float64),
             unitSI=np.float64(1)
         )
-        fields_group.create_dataset(f'{grid_index}_n', data=grid_n,
+        fields_group.create_dataset(f'{particle_name}_n', data=grid_n,
                                     **self.create_dataset_kwargs)
-        self.write_settings(fields_group[f'{grid_index}_n'], n_attrs)
+        self.write_settings(fields_group[f'{particle_name}_n'], n_attrs)
 
         T_attrs = dict(
             geometry=np.string_('cartesian'),
@@ -757,9 +754,9 @@ class BaseInitializer:
             position=np.array([0, 0, 0], dtype=np.float64),
             unitSI=np.float64(1)
         )
-        fields_group.create_dataset(f'{grid_index}_T', data=grid_T,
+        fields_group.create_dataset(f'{particle_name}_T', data=grid_T,
                                     **self.create_dataset_kwargs)
-        self.write_settings(fields_group[f'{grid_index}_T'], T_attrs)
+        self.write_settings(fields_group[f'{particle_name}_T'], T_attrs)
 
         U_attrs = dict(
             geometry=np.string_('cartesian'),
@@ -773,8 +770,8 @@ class BaseInitializer:
             fieldSmoothing=np.string_('none'),
             timeOffset=0.,
         )
-        U_group = fields_group.require_group(f'{grid_index}_U')
-        self.write_settings(fields_group[f'{grid_index}_U'], U_attrs)
+        U_group = fields_group.require_group(f'{particle_name}_U')
+        self.write_settings(fields_group[f'{particle_name}_U'], U_attrs)
         for i, axis in enumerate(axis_labels):
             U_group.create_dataset(axis, data=grid_U[..., i],
                                    **self.create_dataset_kwargs)
@@ -820,7 +817,8 @@ class BaseInitializer:
             grid_n = grid_n * n_computational_to_physical\
                 / self.cell_size.prod()
 
+            particle_name = grid_values['particle_name']
             self.write_state(
-                fields_group, grid_index, axis_labels, cp.asnumpy(grid_n),
+                fields_group, particle_name, axis_labels, cp.asnumpy(grid_n),
                 cp.asnumpy(grid_U), cp.asnumpy(grid_T))
         return SavedFlag.state
