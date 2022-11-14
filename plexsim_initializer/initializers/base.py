@@ -59,6 +59,11 @@ class BaseInitializer:
             gilbert_curve = gilbert_curve[mask]
         self.gilbert_curve = [tuple(coord) for coord in gilbert_curve]
 
+        constant_field = _environment_config.get('constant_field_coords')
+        if constant_field is not None:
+            constant_field = self.load_relative_npy_file(constant_field)
+        self.constant_field = constant_field
+
         self.create_dataset_kwargs = dict(
             chunks=True, shuffle=True,
             compression='gzip', compression_opts=5
@@ -183,6 +188,11 @@ class BaseInitializer:
         settings.create_dataset('gilbert_curve',
                                 data=np.array(self.gilbert_curve),
                                 dtype=np.int16)
+
+        if self.constant_field is not None:
+            settings.create_dataset('constant_field_coords',
+                                    data=np.array(self.constant_field),
+                                    dtype=np.int16)
 
     def base_path(self, h5f, iteration):
         return np.string_(h5f.attrs['basePath']).replace(
