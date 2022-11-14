@@ -814,10 +814,10 @@ class BaseInitializer:
             compute_grid_velocity(X, U, C_idx, grid_n, grid_U, grid_U2)
 
             mask = grid_n > density_threshold
-            cp.divide(grid_U[mask], cp.expand_dims(grid_n, axis=-1)[mask],
-                      out=grid_U[mask])
+            grid_U[mask] = cp.divide(grid_U[mask],
+                                     cp.expand_dims(grid_n, axis=-1)[mask])
             grid_U[~mask].fill(0)
-            cp.divide(grid_U2[mask], grid_n[mask], out=grid_U2[mask])
+            grid_U2[mask] = cp.divide(grid_U2[mask], grid_n[mask])
             grid_U2[~mask].fill(0)
 
             grid_U2 -= (grid_U * grid_U).sum(axis=-1)
