@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools>=45", "setuptools_scm[toml]>=6.2"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "plexsim_initializer"
+requires-python = ">=3.9"
+dynamic = ["version"]
+
+[tool.setuptools.packages.find]
+include = ["plexsim_initializer"]
+
+[tool.setuptools_scm]
+write_to = "plexsim_initializer/_version.py"

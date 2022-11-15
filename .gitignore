@@ -42,4 +42,4 @@ dist
 .nv
 
 # setuptools_scm
-plexsim/_version.py
+plexsim_initializer/_version.py
