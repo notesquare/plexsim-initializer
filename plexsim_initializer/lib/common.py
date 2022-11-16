@@ -1,9 +1,7 @@
-import math
 from enum import Flag
 
 import numpy as np
 from numba import njit, float32
-from numba import cuda
 
 
 class SavedFlag(Flag):
@@ -17,34 +15,6 @@ class SavedFlag(Flag):
     @property
     def value(self):
         return np.uint8(super().value)
-
-
-# TODO: remove GPU dependency
-@cuda.jit
-def is_in_grid_kernel(C_idx, mask, coords):
-    i = cuda.grid(1)
-    if i >= C_idx.shape[0]:
-        return
-
-    for j in range(coords.shape[0]):
-        flag = True
-        for k in range(coords.shape[1]):
-            if C_idx[i, k] != coords[j, k]:
-                flag = False
-                break
-        if flag:
-            break
-    mask[i] = flag
-
-
-def is_in_grid(C_idx, mask, coords, stream=None):
-    if C_idx.shape[0] == 0:
-        return
-    threadsperblock = (32,)
-    blockspergrid_x = math.ceil(C_idx.shape[0] / threadsperblock[0])
-    blockspergrid = (blockspergrid_x,)
-    is_in_grid_kernel[blockspergrid, threadsperblock, stream](
-        C_idx, mask, coords)
 
 
 @njit
@@ -77,7 +47,7 @@ def weight_function(X):
     return (((w000, w001), (w010, w011)), ((w100, w101), (w110, w111)))
 
 
-@cuda.jit
+@njit
 def add_density_velocity(cell_index, U, grid_n, grid_U, grid_U2, weight):
     for i in range(2):
         for j in range(2):
@@ -86,38 +56,21 @@ def add_density_velocity(cell_index, U, grid_n, grid_U, grid_U2, weight):
                 _j = cell_index[1] + j
                 _k = cell_index[2] + k
 
-                cuda.atomic.add(grid_n, (_i, _j, _k), weight[i][j][k])
-                _U2 = 0
-                for m in range(3):
-                    cuda.atomic.add(grid_U, (_i, _j, _k, m),
-                                    U[m] * weight[i][j][k])
-                    _U2 += U[m] * U[m]
-                cuda.atomic.add(grid_U2, (_i, _j, _k), _U2 * weight[i][j][k])
+                grid_n[_i, _j, _k] += weight[i][j][k]
+                grid_U[_i, _j, _k] += U * weight[i][j][k]
+                grid_U2[_i, _j, _k] += (U * U).sum() * weight[i][j][k]
 
 
-@cuda.jit
-def compute_grid_velocity_kernel(X, U, C_idx, grid_n, grid_U, grid_U2):
-    i = cuda.grid(1)
-    if i >= X.shape[0]:
-        return
-
-    cell_index = C_idx[i]
-    if cell_index[0] == -1:
-        return
-
-    weight = weight_function(X[i])
-
-    add_density_velocity(cell_index, U[i], grid_n, grid_U, grid_U2, weight)
-
-
+@njit
 def compute_grid_velocity(X, U, C_idx, grid_n, grid_U, grid_U2):
-    if X.shape[0] == 0:
-        return
-    threadsperblock = 32
-    blockspergrid = math.ceil(X.shape[0] / threadsperblock)
-    compute_grid_velocity_kernel[blockspergrid, threadsperblock](
-        X, U, C_idx, grid_n, grid_U, grid_U2
-    )
+    for i in range(X.shape[0]):
+        cell_index = C_idx[i]
+        if np.any(cell_index == -1):
+            continue
+
+        weight = weight_function(X[i])
+
+        add_density_velocity(cell_index, U[i], grid_n, grid_U, grid_U2, weight)
 
 
 def remove_cycle_pattern_from_filename(fp):
