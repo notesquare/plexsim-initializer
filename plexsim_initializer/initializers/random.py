@@ -43,10 +43,17 @@ class RandomInitializer(BaseInitializer):
         distribute_random_normal_vector_length(
             U, avg_velocity, avg_velocity * 1e-3)
 
-        cell_index = np.random.randint(0, len(self.gilbert_curve), n_particles)
-        gilbert_n_particles = np.array([
-            (cell_index == i).sum()
+        gilbert_n_particles = np.random.random(len(self.gilbert_curve))
+        gilbert_n_particles = np.round(gilbert_n_particles * n_particles
+                                       / gilbert_n_particles.sum()).astype(int)
+
+        _n = n_particles - gilbert_n_particles.sum()
+        _indices = np.random.randint(0, len(self.gilbert_curve), abs(_n))
+        _gilbert_n_particles = np.array([
+            (_indices == i).sum()
             for i, _ in enumerate(self.gilbert_curve)])
+
+        gilbert_n_particles += (2 * (_n > 0) - 1) * _gilbert_n_particles
 
         end_indices = gilbert_n_particles.cumsum() - 1
         start_indices = np.empty_like(end_indices).astype(int)
