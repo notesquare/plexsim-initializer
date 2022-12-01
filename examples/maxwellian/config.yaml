@@ -3,7 +3,7 @@ initializer: maxwellian
 environment:
   coordinate_system: cartesian
   grid_shape: [138, 138, 64]
-  cell_size: [0.00925677, 0.00925677, 0.01144446]
+  cell_size: [0.00925644, 0.00925644, 0.01144227]
   external_magnetic_field: ../common/B.npy
   external_electric_field: [0, 0, 0]
   field_dtype: fp64
