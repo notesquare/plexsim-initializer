@@ -4,11 +4,11 @@ from datetime import datetime
 import yaml
 import h5py
 import numpy as np
+import numpy.ma as ma
 
 from ..lib.gilbert3d import gilbert3d
 from ..lib.common import (
     SavedFlag,
-    is_in_grid,
     node_to_center_3d,
     compute_grid_velocity,
     remove_cycle_pattern_from_filename
@@ -49,14 +49,29 @@ class BaseInitializer:
 
         self.chunk_size = int(simulation.get('chunk_size', 1e6))
         self.iteration_encoding = simulation.get('iteration_encoding', 'file')
+        self.save_state = simulation.get('save_state', False)
 
         gilbert_curve = np.array(list(gilbert3d(*self.grid_shape)))
         valid_cells = _environment_config.get('valid_cell_coords')
         if valid_cells is not None:
             valid_cells = self.load_relative_npy_file(valid_cells)
-            mask = np.empty(gilbert_curve.shape[0], dtype=np.bool_)
-            is_in_grid(gilbert_curve, mask, valid_cells)
-            gilbert_curve = gilbert_curve[mask]
+
+            mask = np.zeros(self.grid_shape, dtype=np.bool_)
+            mask[tuple(valid_cells.T)] = True
+
+            gilbert_curve_matrix = np.empty(self.grid_shape, dtype=int)
+            gilbert_curve_matrix[tuple(gilbert_curve.T)] = \
+                np.arange(self.grid_shape.prod())
+
+            idx_i, idx_j, idx_k = np.indices(mask.shape)
+            _idx_i = idx_i[ma.masked_where(mask, idx_i).mask]
+            _idx_j = idx_j[ma.masked_where(mask, idx_j).mask]
+            _idx_k = idx_k[ma.masked_where(mask, idx_k).mask]
+
+            stacked = np.stack([_idx_i, _idx_j, _idx_k,
+                                gilbert_curve_matrix[_idx_i, _idx_j, _idx_k]])
+            gilbert_curve = stacked[:, np.lexsort(stacked)].T[:, :-1]
+
         self.gilbert_curve = [tuple(coord) for coord in gilbert_curve]
 
         constant_field = _environment_config.get('constant_field_coords')
@@ -124,7 +139,8 @@ class BaseInitializer:
             t and t.update()
             flag |= self.setup_stats(h5f, iteration=iteration)
             t and t.update()
-            flag != self.setup_state(h5f, iteration=iteration)
+            if self.save_state:
+                flag |= self.setup_state(h5f, iteration=iteration)
             t and t.update()
 
             if self.iteration_encoding == 'file':
@@ -790,34 +806,31 @@ class BaseInitializer:
             U_group[axis].attrs['unitSI'] = np.float64(1)
 
     def setup_state(self, h5f, iteration=0, density_threshold=1e-10):
-        # TODO: remove GPU dependency
-        import cupy as cp
-
         fields_path = self.base_path(h5f, iteration) \
             + np.string_(h5f.attrs['meshesPath'])
         fields_group = h5f.require_group(fields_path)
 
         axis_labels = [np.string_(v) for v in ['x', 'y', 'z']]
         for grid_index, grid_values in self.particles.items():
-            X = cp.array(grid_values['X'])
-            U = cp.array(grid_values['U'])
-            C_idx = cp.array(grid_values['C_idx'])
+            X = grid_values['X']
+            U = grid_values['U']
+            C_idx = grid_values['C_idx']
             q = grid_values['q']
             m = grid_values['m']
             n_computational_to_physical = \
                 grid_values['n_computational_to_physical']
 
-            grid_n = cp.zeros((self.grid_shape + 1), dtype=np.float32)
-            grid_U = cp.zeros((*(self.grid_shape + 1), 3), dtype=np.float32)
-            grid_U2 = cp.zeros((self.grid_shape + 1), dtype=np.float32)
+            grid_n = np.zeros((self.grid_shape + 1), dtype=np.float32)
+            grid_U = np.zeros((*(self.grid_shape + 1), 3), dtype=np.float32)
+            grid_U2 = np.zeros((self.grid_shape + 1), dtype=np.float32)
 
             compute_grid_velocity(X, U, C_idx, grid_n, grid_U, grid_U2)
 
             mask = grid_n > density_threshold
-            grid_U[mask] = cp.divide(grid_U[mask],
-                                     cp.expand_dims(grid_n, axis=-1)[mask])
+            grid_U[mask] = np.divide(grid_U[mask],
+                                     np.expand_dims(grid_n, axis=-1)[mask])
             grid_U[~mask].fill(0)
-            grid_U2[mask] = cp.divide(grid_U2[mask], grid_n[mask])
+            grid_U2[mask] = np.divide(grid_U2[mask], grid_n[mask])
             grid_U2[~mask].fill(0)
 
             grid_U2 -= (grid_U * grid_U).sum(axis=-1)
@@ -828,7 +841,6 @@ class BaseInitializer:
                 / self.cell_size.prod()
 
             particle_name = grid_values['particle_name']
-            self.write_state(
-                fields_group, particle_name, axis_labels, cp.asnumpy(grid_n),
-                cp.asnumpy(grid_U), cp.asnumpy(grid_T))
+            self.write_state(fields_group, particle_name, axis_labels,
+                             grid_n, grid_U, grid_T)
         return SavedFlag.state
