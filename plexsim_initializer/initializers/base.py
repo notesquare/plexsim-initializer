@@ -49,6 +49,7 @@ class BaseInitializer:
 
         self.chunk_size = int(simulation.get('chunk_size', 1e6))
         self.iteration_encoding = simulation.get('iteration_encoding', 'file')
+        self.save_state = simulation.get('save_state', False)
 
         gilbert_curve = np.array(list(gilbert3d(*self.grid_shape)))
         valid_cells = _environment_config.get('valid_cell_coords')
@@ -138,7 +139,8 @@ class BaseInitializer:
             t and t.update()
             flag |= self.setup_stats(h5f, iteration=iteration)
             t and t.update()
-            flag != self.setup_state(h5f, iteration=iteration)
+            if self.save_state:
+                flag |= self.setup_state(h5f, iteration=iteration)
             t and t.update()
 
             if self.iteration_encoding == 'file':
