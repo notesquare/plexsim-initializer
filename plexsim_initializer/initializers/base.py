@@ -286,6 +286,7 @@ class BaseInitializer:
 
     def write_B(self, fields_group, B, field_dtype):
         B_group = fields_group.require_group(np.string_('B'))
+        B_induced_group = fields_group.require_group(np.string_('B_induced'))
 
         dimension = len(self.grid_shape)
         if dimension == 3:
@@ -307,6 +308,7 @@ class BaseInitializer:
         )
 
         self.write_settings(B_group, B_attrs)
+        self.write_settings(B_induced_group, B_attrs)
 
         for i, axis in enumerate(axis_labels):
             _B = B[..., i].astype(field_dtype)
@@ -316,8 +318,16 @@ class BaseInitializer:
                 dimension, dtype=field_dtype)
             B_group[axis].attrs['unitSI'] = np.float64(1)
 
+            _B = np.zeros_like(_B)
+            B_induced_group.create_dataset(axis, data=_B,
+                                           **self.create_dataset_kwargs)
+            B_induced_group[axis].attrs['position'] = np.zeros(
+                dimension, dtype=field_dtype)
+            B_induced_group[axis].attrs['unitSI'] = np.float64(1)
+
     def write_E(self, fields_group, E, field_dtype):
         E_group = fields_group.require_group(np.string_('E'))
+        E_induced_group = fields_group.require_group(np.string_('E_induced'))
 
         dimension = len(self.grid_shape)
         if dimension == 3:
@@ -339,6 +349,7 @@ class BaseInitializer:
         )
 
         self.write_settings(E_group, E_attrs)
+        self.write_settings(E_induced_group, E_attrs)
 
         for i, axis in enumerate(axis_labels):
             _E = E[..., i].astype(field_dtype)
@@ -347,6 +358,13 @@ class BaseInitializer:
             E_group[axis].attrs['position'] = np.zeros(
                 dimension, dtype=field_dtype)
             E_group[axis].attrs['unitSI'] = np.float64(1)
+
+            _E = np.zeros_like(_E)
+            E_induced_group.create_dataset(axis, data=_E,
+                                           **self.create_dataset_kwargs)
+            E_induced_group[axis].attrs['position'] = np.zeros(
+                dimension, dtype=field_dtype)
+            E_induced_group[axis].attrs['unitSI'] = np.float64(1)
 
     def load_particles(self, dtype_X, dtype_U, particles, grid_config):
         raise NotImplementedError()
@@ -738,7 +756,9 @@ class BaseInitializer:
             n_particles=np.array(n_particles),
             kinetic_E=np.array(kinetic_E),
             electric_E=electric_E,
+            induced_electric_E=0,
             magnetic_E=magnetic_E,
+            induced_magnetic_E=0,
             total_E=sum(kinetic_E) + electric_E + magnetic_E
         )
 

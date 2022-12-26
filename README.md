@@ -92,6 +92,7 @@ grids:
 simulation:
   chunk_size: 1.e+6
   iteration_encoding: file
+  save_state: No
 
 ```
 
@@ -213,6 +214,8 @@ simulation:
   - `.h5` 파일 dataset의 `chunk size`를 지정합니다.
 - **iteration_encoding**: _{'file', 'group'}_
   - `iteration_encoding` 타입을 지정합니다. (https://github.com/openPMD/openPMD-standard/blob/latest/STANDARD.md#iterations-and-time-series 참고)
+- **save_state**: _{'True'(='Yes'), 'False'(='No')}_
+  - 격자점의 `temperature`, `density`, `avg velocity`를 저장합니다. 입자 수가 많은 경우 성능이 저해될 수 있습니다.
 
 
 ## Serialize Structure
@@ -229,8 +232,10 @@ e.g. `proj.h5`
 /data
   /{cycle}
     /fields
-      /B  # magnetic field
-      /E  # electric field
+      /B  # magnetic field, external + induced
+      /E  # electric field, external + induced
+      /B_induced
+      /E_induced 
       electron_T  # temperature[eV] of electron on node points
       electron_n  # density[m^-3] of electron on node points
       /electron_U  # avg velocity[m/s] of electron on node points
