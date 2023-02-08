@@ -11,8 +11,8 @@ def distribute_random_normal_vector_length(V, l, s):  # noqa
 
         _sum = 0
         for j in range(V.shape[1]):
-            v = np.random.random()
-            V[i, j] = (v - 0.5) * 2
+            v = (np.random.random() - 0.5) * 2
+            V[i, j] = v
             _sum += v ** 2
         _l = np.sqrt(_sum)
 
@@ -37,7 +37,9 @@ class RandomInitializer(BaseInitializer):
         n_particles = int(n_particles)
 
         avg_velocity = initial_condition.get('avg_velocity', 0)
-        X = np.random.random((n_particles, 3)).astype(dtype_X)
+        X = np.random.random((n_particles, 3))
+        if dtype_X != X.dtype:
+            X = np.clip(X, 0, 1 - np.finfo(dtype_X).eps).astype(dtype_X)
         U = np.empty((n_particles, 3), dtype=dtype_U)
 
         distribute_random_normal_vector_length(

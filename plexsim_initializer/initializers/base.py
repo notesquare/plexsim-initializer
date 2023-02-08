@@ -676,6 +676,7 @@ class BaseInitializer:
     def serialize_particle(self, h5_group, particle_data, tracking=None):
         # serialize X, U
         X = particle_data['X'] + particle_data['C_idx']
+        np.nextafter(X, particle_data['C_idx'], out=X)
         U = particle_data['U']
 
         if tracking is not None:

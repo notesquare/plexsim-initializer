@@ -1,6 +1,6 @@
 # PLEXsim
 
-Plasma Extensible Simualtion (PLEXsim) Solver 사용 설명입니다.
+PLasma EXtensible Simulation (PLEXsim) Solver 사용 설명입니다.
 
 
 ## Usage

@@ -78,7 +78,9 @@ class MaxwellianInitializer(BaseInitializer):
 
         n_particles = gilbert_n_particles.sum()
 
-        X = np.random.random((n_particles, 3)).astype(dtype_X)
+        X = np.random.random((n_particles, 3))
+        if dtype_X != X.dtype:
+            X = np.clip(X, 0, 1 - np.finfo(dtype_X).eps).astype(dtype_X)
         C_idx = np.empty((n_particles, 3), dtype=np.int16)
         U = np.empty((n_particles, 3), dtype=dtype_U)
 
