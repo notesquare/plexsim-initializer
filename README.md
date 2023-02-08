@@ -1,6 +1,6 @@
 # PLEXsim Initializer
 
-Plasma Extensible Simualtion (PLEXsim) Initializer 사용 설명입니다.
+PLasma EXtensible Simulation (PLEXsim) Initializer 사용 설명입니다.
 
 
 ## Install
