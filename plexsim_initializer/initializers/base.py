@@ -524,7 +524,11 @@ class BaseInitializer:
                 self.write_particle_attrs(
                     p_group, particle_data, n_splits,
                     n_computational_to_physical)
-                self.serialize_particle(p_group, particle_data)
+
+                C_idx = particle_data['C_idx']
+                X = np.nextafter(particle_data['X'] + C_idx, C_idx)
+                U = particle_data['U']
+                self.serialize_particle(p_group, X, U, m)
 
                 # create external link in
                 h5f[p_path] = h5py.ExternalLink(grid_fp, p_path)
@@ -540,7 +544,6 @@ class BaseInitializer:
                     tracked_group.attrs['_gridIndex'] = grid_index
                     tracked_group.attrs['_tracked'] = 1
 
-                    particle_data = self.particles[grid_index]
                     n_particles = particle_data['X'].shape[0]
 
                     tracked_attrs = self.get_particle_attrs(
@@ -576,7 +579,7 @@ class BaseInitializer:
                         tracking_start_id + n_track_particles,
                         dtype=np.uint64)
                     self.serialize_particle(
-                        tracked_group, particle_data,
+                        tracked_group, X, U, m,
                         tracking=(particle_indices, tracking_ids))
                     # create external link in
                     h5f[tracked_path] = h5py.ExternalLink(grid_fp,
@@ -587,7 +590,6 @@ class BaseInitializer:
                     flag |= SavedFlag.tracked
 
             # calculate and store kinetic_E
-            U = self.particles[grid_index]['U']
             kinetic_E = 0.5 * m * (U * U).sum().item() \
                 * n_computational_to_physical
             self.particles[grid_index]['kinetic_E'] = kinetic_E
@@ -673,12 +675,8 @@ class BaseInitializer:
         h5_group['weighting'][:] = n_computational_to_physical
         self.write_settings(h5_group['weighting'], weighting_attrs)
 
-    def serialize_particle(self, h5_group, particle_data, tracking=None):
+    def serialize_particle(self, h5_group, X, U, m, tracking=None):
         # serialize X, U
-        X = particle_data['X'] + particle_data['C_idx']
-        np.nextafter(X, particle_data['C_idx'], out=X)
-        U = particle_data['U']
-
         if tracking is not None:
             particle_indices, tracking_ids = tracking
             h5_group.attrs['_particleIndices'] = particle_indices
@@ -724,7 +722,7 @@ class BaseInitializer:
             _path = f'momentum/{axis}'
             h5_group.create_dataset(_path, data=U[:, i],
                                     **_create_dataset_kwargs)
-            h5_group[_path].attrs['unitSI'] = np.float64(particle_data['m'])
+            h5_group[_path].attrs['unitSI'] = np.float64(m)
 
     @property
     def field_E(self, permeability=1.257e-6, permittivity=8.854e-12):
