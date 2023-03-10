@@ -19,6 +19,10 @@ class SavedFlag(Flag):
 
 @njit
 def node_to_center_3d(V, V_center):
+    assert len(V.shape) == len(V_center.shape)
+    for i in range(3):
+        assert V.shape[i] == V_center.shape[i] + 1
+
     for i in range(V_center.shape[0]):
         for j in range(V_center.shape[1]):
             for k in range(V_center.shape[2]):
