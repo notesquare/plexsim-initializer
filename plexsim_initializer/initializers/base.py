@@ -21,6 +21,11 @@ class BaseInitializer:
         _environment_config = environment.copy()
         self.cell_size = np.array(_environment_config.pop('cell_size'))
         self.grid_shape = np.array(_environment_config.pop('grid_shape'))
+        self.permeability = np.pi * 4.e-7 * \
+            _environment_config.pop('relative_permeability', 1)
+        self.permittivity = 8.854e-12 * \
+            _environment_config.pop('relative_permittivity', 1)
+
         self.environment_config = _environment_config
 
         # base path for loading files specified in the yaml config
@@ -196,7 +201,9 @@ class BaseInitializer:
 
         env_attrs = dict(
             grid_shape=self.grid_shape,
-            cell_size=self.cell_size
+            cell_size=self.cell_size,
+            permittivity=self.permittivity,
+            permeability=self.permeability
         )
 
         settings = h5f.require_group('settings')
@@ -725,7 +732,7 @@ class BaseInitializer:
             h5_group[_path].attrs['unitSI'] = np.float64(m)
 
     @property
-    def field_E(self, permeability=1.257e-6, permittivity=8.854e-12):
+    def field_E(self):
         B_center = np.empty((*(self.grid_shape), 3))
         E_center = np.empty((*(self.grid_shape), 3))
 
@@ -733,9 +740,9 @@ class BaseInitializer:
         node_to_center_3d(self.E, E_center)
 
         magnetic_E = 0.5 * self.cell_size.prod() * \
-            permeability * (B_center * B_center).sum()
+            self.permeability * (B_center * B_center).sum()
         electric_E = 0.5 * self.cell_size.prod() * \
-            permittivity * (E_center * E_center).sum()
+            self.permittivity * (E_center * E_center).sum()
 
         return magnetic_E, electric_E
 

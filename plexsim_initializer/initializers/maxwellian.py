@@ -9,7 +9,7 @@ from ..lib.common import node_to_center_3d
 
 @njit
 def distribute_maxwellian(C_idx, U, start_indices, end_indices, gilbert_curve,
-                          vth_list, velocity_list, q, m, nvts=3.3):
+                          vth_list, velocity_list, nvts=3.3):
     def f(v):
         # cumulative distribution function of speed
         return -2 * v * np.exp(-v * v) / np.sqrt(np.pi) + math.erf(v)
@@ -111,7 +111,7 @@ class MaxwellianInitializer(BaseInitializer):
 
         distribute_maxwellian(C_idx, U, start_indices, end_indices,
                               np.array(self.gilbert_curve), gilbert_vth,
-                              gilbert_drifted_velocity, q, m)
+                              gilbert_drifted_velocity)
 
         particles.update(dict(
             X=X,

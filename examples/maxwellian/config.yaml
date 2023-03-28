@@ -9,6 +9,8 @@ environment:
   field_dtype: fp64
   valid_cell_coords: ../common/valid_cell_coords.npy
   constant_field_coords: ../common/constant_field_coords.npy
+  relative_permittivity: 1
+  relative_permeability: 1
 
 grids:
   -
