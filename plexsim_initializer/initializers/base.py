@@ -233,22 +233,22 @@ class BaseInitializer:
 
         self.write_settings(base, base_attrs)
 
-    def load_external_field(self, external_field, field_dtype):
+    def load_field(self, field, field_dtype):
         grid_vertex_shape = (*(self.grid_shape + 1), 3)
 
-        if isinstance(external_field, list):
-            return np.full(grid_vertex_shape, external_field,
+        if isinstance(field, list):
+            return np.full(grid_vertex_shape, field,
                            dtype=field_dtype)
-        elif isinstance(external_field, str):
-            if external_field.endswith('.npy'):
-                F = self.load_relative_npy_file(external_field) \
+        elif isinstance(field, str):
+            if field.endswith('.npy'):
+                F = self.load_relative_npy_file(field) \
                     .astype(field_dtype)
                 assert np.all(F.shape == grid_vertex_shape)
                 return F
             else:
                 raise NotImplementedError()
-        elif isinstance(external_field, np.ndarray):
-            return external_field.astype(field_dtype)
+        elif isinstance(field, np.ndarray):
+            return field.astype(field_dtype)
         else:
             raise NotImplementedError()
 
@@ -277,21 +277,25 @@ class BaseInitializer:
         else:
             raise NotImplementedError()
 
-        magnetic_field = self.environment_config.get('external_magnetic_field')
-        electric_field = self.environment_config.get('external_electric_field')
+        self.B_external = self.load_field(
+            self.environment_config.get('external_magnetic_field'),
+            field_dtype)
+        self.B_induced = self.load_field(
+            self.environment_config.get('induced_magnetic_field', [0, 0, 0]),
+            field_dtype)
+        self.E_external = self.load_field(
+            self.environment_config.get('external_electric_field'),
+            field_dtype)
+        self.E_induced = self.load_field(
+            self.environment_config.get('induced_electric_field', [0, 0, 0]),
+            field_dtype)
 
-        B = self.load_external_field(magnetic_field, field_dtype)
-        E = self.load_external_field(electric_field, field_dtype)
-
-        self.write_B(fields, B, field_dtype)
-        self.write_E(fields, E, field_dtype)
-
-        self.B = B
-        self.E = E
+        self.write_B(fields)
+        self.write_E(fields)
 
         return SavedFlag.fields
 
-    def write_B(self, fields_group, B, field_dtype):
+    def write_B(self, fields_group):
         B_group = fields_group.require_group(np.string_('B'))
         B_induced_group = fields_group.require_group(np.string_('B_induced'))
 
@@ -317,22 +321,21 @@ class BaseInitializer:
         self.write_settings(B_group, B_attrs)
         self.write_settings(B_induced_group, B_attrs)
 
+        B = self.B_external + self.B_induced
         for i, axis in enumerate(axis_labels):
-            _B = B[..., i].astype(field_dtype)
-            B_group.create_dataset(axis, data=_B,
+            B_group.create_dataset(axis, data=B[..., i],
                                    **self.create_dataset_kwargs)
             B_group[axis].attrs['position'] = np.zeros(
-                dimension, dtype=field_dtype)
+                dimension, dtype=B.dtype)
             B_group[axis].attrs['unitSI'] = np.float64(1)
 
-            _B = np.zeros_like(_B)
-            B_induced_group.create_dataset(axis, data=_B,
+            B_induced_group.create_dataset(axis, data=self.B_induced[..., i],
                                            **self.create_dataset_kwargs)
             B_induced_group[axis].attrs['position'] = np.zeros(
-                dimension, dtype=field_dtype)
+                dimension, dtype=self.B_induced.dtype)
             B_induced_group[axis].attrs['unitSI'] = np.float64(1)
 
-    def write_E(self, fields_group, E, field_dtype):
+    def write_E(self, fields_group):
         E_group = fields_group.require_group(np.string_('E'))
         E_induced_group = fields_group.require_group(np.string_('E_induced'))
 
@@ -358,19 +361,18 @@ class BaseInitializer:
         self.write_settings(E_group, E_attrs)
         self.write_settings(E_induced_group, E_attrs)
 
+        E = self.E_external + self.E_induced
         for i, axis in enumerate(axis_labels):
-            _E = E[..., i].astype(field_dtype)
-            E_group.create_dataset(axis, data=_E,
+            E_group.create_dataset(axis, data=E[..., i],
                                    **self.create_dataset_kwargs)
             E_group[axis].attrs['position'] = np.zeros(
-                dimension, dtype=field_dtype)
+                dimension, dtype=E.dtype)
             E_group[axis].attrs['unitSI'] = np.float64(1)
 
-            _E = np.zeros_like(_E)
-            E_induced_group.create_dataset(axis, data=_E,
+            E_induced_group.create_dataset(axis, data=self.E_induced[..., i],
                                            **self.create_dataset_kwargs)
             E_induced_group[axis].attrs['position'] = np.zeros(
-                dimension, dtype=field_dtype)
+                dimension, dtype=self.E_induced.dtype)
             E_induced_group[axis].attrs['unitSI'] = np.float64(1)
 
     def load_particles(self, dtype_X, dtype_U, particles, grid_config):
@@ -732,22 +734,39 @@ class BaseInitializer:
             h5_group[_path].attrs['unitSI'] = np.float64(m)
 
     @property
-    def field_E(self):
-        B_center = np.empty((*(self.grid_shape), 3))
-        E_center = np.empty((*(self.grid_shape), 3))
+    def magnetic_E(self):
+        grid_center_shape = np.array((*(self.grid_shape), 3))
+        B_center = np.empty(grid_center_shape)
 
-        node_to_center_3d(self.B, B_center)
-        node_to_center_3d(self.E, E_center)
-
+        node_to_center_3d(self.B_external + self.B_induced, B_center)
         magnetic_E = 0.5 * self.cell_size.prod() * \
             self.permeability * (B_center * B_center).sum()
+
+        node_to_center_3d(self.B_induced, B_center)
+        induced_magnetic_E = 0.5 * self.cell_size.prod() * \
+            self.permeability * (B_center * B_center).sum()
+
+        return magnetic_E, induced_magnetic_E
+
+    @property
+    def electric_E(self):
+        grid_center_shape = np.array((*(self.grid_shape), 3))
+        E_center = np.empty(grid_center_shape)
+
+        node_to_center_3d(self.E_external + self.E_induced, E_center)
         electric_E = 0.5 * self.cell_size.prod() * \
             self.permittivity * (E_center * E_center).sum()
 
-        return magnetic_E, electric_E
+        node_to_center_3d(self.E_induced, E_center)
+        induced_electric_E = 0.5 * self.cell_size.prod() * \
+            self.permittivity * (E_center * E_center).sum()
+
+        return electric_E, induced_electric_E
 
     def setup_stats(self, h5f, iteration=0):
-        magnetic_E, electric_E = self.field_E
+        magnetic_E, induced_magnetic_E = self.magnetic_E
+        electric_E, induced_electric_E = self.electric_E
+        field_E = magnetic_E + electric_E
 
         n_particles = []
         kinetic_E = []
@@ -762,10 +781,10 @@ class BaseInitializer:
             n_particles=np.array(n_particles),
             kinetic_E=np.array(kinetic_E),
             electric_E=electric_E,
-            induced_electric_E=0,
+            induced_electric_E=induced_electric_E,
             magnetic_E=magnetic_E,
-            induced_magnetic_E=0,
-            total_E=sum(kinetic_E) + electric_E + magnetic_E
+            induced_magnetic_E=induced_magnetic_E,
+            total_E=sum(kinetic_E) + field_E
         )
 
         self.write_settings(stats_group, stats_attrs)

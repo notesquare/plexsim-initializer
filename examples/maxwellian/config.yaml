@@ -5,7 +5,9 @@ environment:
   grid_shape: [138, 138, 64]
   cell_size: [0.00925644, 0.00925644, 0.01144227]
   external_magnetic_field: ../common/B.npy
+  induced_magnetic_field: [0, 0, 0]
   external_electric_field: [0, 0, 0]
+  induced_electric_field: [0, 0, 0]
   field_dtype: fp64
   valid_cell_coords: ../common/valid_cell_coords.npy
   constant_field_coords: ../common/constant_field_coords.npy
