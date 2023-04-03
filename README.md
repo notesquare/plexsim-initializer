@@ -52,10 +52,14 @@ environment:
   grid_shape: [138, 138, 64]
   cell_size: [0.00925677, 0.00925677, 0.01144446]
   external_magnetic_field: ../common/B.npy
+  induced_magnetic_field: [0 ,0, 0]
   external_electric_field: [0, 0, 0]
+  induced_electric_field: [0 ,0, 0]
   field_dtype: fp64
   valid_cell_coords: ../common/valid_cell_coords.npy
   constant_field_coords: ../common/constant_field_coords.npy
+  relative_permittivity: 1
+  relative_permeability: 1
 
 grids:
   -
@@ -110,10 +114,14 @@ environment:
   grid_shape: [138, 138, 64]
   cell_size: [0.00925677, 0.00925677, 0.01144446]
   external_magnetic_field: ../common/B.npy
+  induced_magnetic_field: [0 ,0, 0]
   external_electric_field: [0, 0, 0]
+  induced_electric_field: [0 ,0, 0]
   field_dtype: fp64
   valid_cell_coords: ../common/valid_cell_coords.npy
   constant_field_coords: ../common/constant_field_coords.npy
+  relative_permittivity: 1
+  relative_permeability: 1
 ```
 - **coordinate_system**: _'cartesian'_
   - 좌표계를 설정합니다. _'cylindrical'_ 업데이트 예정
@@ -126,8 +134,12 @@ environment:
     - _list_: x, y, z 방향의 자기장 [T]을 지정합니다. 모든 격자점(node)에 같은 크기로 할당됩니다.
     - _file_: 각 격자점의 자기장 정보를 담고 있는 `.npy` 파일의 경로를 지정합니다.
       - e.g. `grid_shape == [138, 138, 64]` 인 경우 `external_magnetic_field의 shape == [139, 139, 65, 3]`이어야 합니다.
+- **induced_magnetic_field**: _list or file, optional_
+  - 초기 유도 자기장을 설정합니다. 입력 형식은 `external_magnetic_field`와 같습니다. 입력하지 않은 경우 0으로 초기화됩니다.
 - **external_electric_field**: _list or file_
   - 초기 외부 전기장 [V/m]을 설정합니다. 입력 형식은 `external_magnetic_field`와 같습니다.
+- **induced_electric_field**: _list or file, optional_
+  - 초기 유도 전기장을 설정합니다. 입력 형식은 `external_magnetic_field`와 같습니다. 입력하지 않은 경우 0으로 초기화됩니다.  
 - **field_dtype**: _{'fp32', 'fp64'}_
   - 전기장과 자기장 배열의 부동 소수점 형식을 지정합니다. 32비트 단일 정밀도 형식과 64비트 이중 정밀도 형식 중 선택할 수 있습니다.
 - **valid_cell_coords**: _file, optional_
@@ -137,7 +149,10 @@ environment:
 - **constant_field_coords**: _file, optional_
   - 초기 입력값으로 자기장, 전기장 값을 고정할 격자점 좌표를 담고 있는 `.npy`파일 경로. 장이 경계면에 반사되는 것을 막기 위해 사용.
   - e.g `[[0, 0, 0], [0, 0, 1], ..., [138, 138, 64]]`
-
+- **relative_permittivity**: _float, optional_
+  - [relative permittivity](https://en.wikipedia.org/wiki/Relative_permittivity) 를 설정합니다. 입력하지 않을 경우 1로 설정됩니다.
+- **relative_permeability**: _float, optional_
+  - [relative permeability](https://en.wikipedia.org/wiki/Relative_permeability) 를 설정합니다. 입력하지 않을 경우 1로 설정됩니다.
 
 #### Grids
 
