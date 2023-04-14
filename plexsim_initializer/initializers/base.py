@@ -79,10 +79,19 @@ class BaseInitializer:
 
         self.gilbert_curve = [tuple(coord) for coord in gilbert_curve]
 
-        constant_field = _environment_config.get('constant_field_coords')
-        if constant_field is not None:
-            constant_field = self.load_relative_npy_file(constant_field)
-        self.constant_field = constant_field
+        constant_field_node = _environment_config.get(
+            'constant_field_node_coords')
+        if constant_field_node is not None:
+            constant_field_node = \
+                self.load_relative_npy_file(constant_field_node)
+        self.constant_field_node = constant_field_node
+
+        constant_field_center = _environment_config.get(
+            'constant_field_center_coords')
+        if constant_field_center is not None:
+            constant_field_center = \
+                self.load_relative_npy_file(constant_field_center)
+        self.constant_field_center = constant_field_center
 
         self.create_dataset_kwargs = dict(
             chunks=True, shuffle=True,
@@ -212,9 +221,14 @@ class BaseInitializer:
                                 data=np.array(self.gilbert_curve),
                                 dtype=np.int16)
 
-        if self.constant_field is not None:
-            settings.create_dataset('constant_field_coords',
-                                    data=np.array(self.constant_field),
+        if self.constant_field_node is not None:
+            settings.create_dataset('constant_field_node_coords',
+                                    data=np.array(self.constant_field_node),
+                                    dtype=np.int16)
+
+        if self.constant_field_center is not None:
+            settings.create_dataset('constant_field_center_coords',
+                                    data=np.array(self.constant_field_center),
                                     dtype=np.int16)
 
     def base_path(self, h5f, iteration):
@@ -233,7 +247,7 @@ class BaseInitializer:
 
         self.write_settings(base, base_attrs)
 
-    def load_field(self, field, field_dtype):
+    def load_field_node(self, field, field_dtype):
         grid_vertex_shape = (*(self.grid_shape + 1), 3)
 
         if isinstance(field, list):
@@ -244,6 +258,24 @@ class BaseInitializer:
                 F = self.load_relative_npy_file(field) \
                     .astype(field_dtype)
                 assert np.all(F.shape == grid_vertex_shape)
+                return F
+            else:
+                raise NotImplementedError()
+        elif isinstance(field, np.ndarray):
+            return field.astype(field_dtype)
+        else:
+            raise NotImplementedError()
+
+    def load_field_center(self, field, field_dtype):
+        shape = (*(self.grid_shape), 3)
+
+        if isinstance(field, list):
+            return np.full(shape, field, dtype=field_dtype)
+        elif isinstance(field, str):
+            if field.endswith('.npy'):
+                F = self.load_relative_npy_file(field) \
+                    .astype(field_dtype)
+                assert np.all(F.shape == shape)
                 return F
             else:
                 raise NotImplementedError()
@@ -277,16 +309,16 @@ class BaseInitializer:
         else:
             raise NotImplementedError()
 
-        self.B_external = self.load_field(
+        self.B_external = self.load_field_center(
             self.environment_config.get('external_magnetic_field'),
             field_dtype)
-        self.B_induced = self.load_field(
+        self.B_induced = self.load_field_center(
             self.environment_config.get('induced_magnetic_field', [0, 0, 0]),
             field_dtype)
-        self.E_external = self.load_field(
+        self.E_external = self.load_field_node(
             self.environment_config.get('external_electric_field'),
             field_dtype)
-        self.E_induced = self.load_field(
+        self.E_induced = self.load_field_node(
             self.environment_config.get('induced_electric_field', [0, 0, 0]),
             field_dtype)
 
@@ -735,16 +767,12 @@ class BaseInitializer:
 
     @property
     def magnetic_E(self):
-        grid_center_shape = np.array((*(self.grid_shape), 3))
-        B_center = np.empty(grid_center_shape)
-
-        node_to_center_3d(self.B_external + self.B_induced, B_center)
+        B_total = self.B_external + self.B_induced
         magnetic_E = 0.5 * self.cell_size.prod() * \
-            self.permeability * (B_center * B_center).sum()
+            self.permeability * (B_total * B_total).sum()
 
-        node_to_center_3d(self.B_induced, B_center)
         induced_magnetic_E = 0.5 * self.cell_size.prod() * \
-            self.permeability * (B_center * B_center).sum()
+            self.permeability * (self.B_induced * self.B_induced).sum()
 
         return magnetic_E, induced_magnetic_E
 
