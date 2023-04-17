@@ -768,10 +768,10 @@ class BaseInitializer:
     @property
     def magnetic_E(self):
         B_total = self.B_external + self.B_induced
-        magnetic_E = 0.5 * self.cell_size.prod() * \
+        magnetic_E = 0.5 * self.cell_size.prod() / \
             self.permeability * (B_total * B_total).sum()
 
-        induced_magnetic_E = 0.5 * self.cell_size.prod() * \
+        induced_magnetic_E = 0.5 * self.cell_size.prod() / \
             self.permeability * (self.B_induced * self.B_induced).sum()
 
         return magnetic_E, induced_magnetic_E
