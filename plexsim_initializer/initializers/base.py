@@ -340,7 +340,7 @@ class BaseInitializer:
         B_attrs = dict(
             geometry=np.string_('cartesian'),
             gridSpacing=self.cell_size,
-            gridGlobalOffset=np.zeros(dimension, dtype=np.float64),
+            gridGlobalOffset=np.zeros(dimension, dtype=np.float64) + 0.5,
             gridUnitSI=np.float64(1),
             dataOrder=np.string_('C'),
             axisLabels=np.array(axis_labels),
