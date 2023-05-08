@@ -48,6 +48,7 @@ grids:
         sample: random
 
 simulation:
+  backend: local
   chunk_size: 1.e+6
   iteration_encoding: file
   save_state: No

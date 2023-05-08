@@ -1,15 +1,13 @@
 import math
 
 import numpy as np
-from numba import njit
+import h5py
 
 from .base import BaseInitializer
 from ..lib.common import node_to_center_3d
 
 
-@njit
-def distribute_maxwellian(C_idx, U, start_indices, end_indices, gilbert_curve,
-                          vth_list, velocity_list, nvts=3.3):
+def get_v_table(nvts=3.3):
     def f(v):
         # cumulative distribution function of speed
         return -2 * v * np.exp(-v * v) / np.sqrt(np.pi) + math.erf(v)
@@ -31,25 +29,33 @@ def distribute_maxwellian(C_idx, U, start_indices, end_indices, gilbert_curve,
                                       sin_theta * np.sin(aphi),
                                       cos_theta])
 
-    for i in range(gilbert_curve.shape[0]):
-        vth = vth_list[i]
-        velocity = velocity_list[i]
+    return v_table
 
-        start = start_indices[i]
-        end = end_indices[i]
-        indices = np.random.choice(n_velocity_dist, end - start + 1)
 
-        U[start:end+1] = vth * v_table[indices] + velocity
-        C_idx[start:end+1] = gilbert_curve[i]
+def _distribute_maxwellian(start, end, vth, velocity, cell_coords,
+                           v_table, dtype_X, dtype_U):
+    n_particles = end - start + 1
+
+    X = np.random.random((n_particles, 3))
+    if dtype_X != X.dtype:
+        X = np.clip(X, 0, 1 - np.finfo(dtype_X).eps).astype(dtype_X)
+    U = np.empty((n_particles, 3), dtype=dtype_U)
+
+    n_velocity_dist = v_table.shape[0]
+    indices = np.random.choice(n_velocity_dist, n_particles)
+    U[:] = vth * v_table[indices] + velocity
+    C_idx = np.full((n_particles, 3), cell_coords)
+
+    U2 = (U * U).sum().item()
+    return X, U, C_idx, U2
 
 
 class MaxwellianInitializer(BaseInitializer):
-    def load_particles(self, dtype_X, dtype_U, particles, grid_config):
-        initial_condition = grid_config.get('initial_condition', {})
-
+    def load_particles_pre(self, particles, grid_config):
         q = particles['q']
         m = particles['m']
 
+        initial_condition = grid_config.get('initial_condition', {})
         temperature = initial_condition['temperature']
         density = initial_condition['density']
         current_density = initial_condition.get('current_density')
@@ -96,26 +102,70 @@ class MaxwellianInitializer(BaseInitializer):
         gilbert_drifted_velocity = np.array([
             drifted_velocity[coord] for coord in self.gilbert_curve])
 
+        particles.update(dict(
+            n_particles=gilbert_n_particles.sum(),
+            gilbert_n_particles=gilbert_n_particles,
+            gilbert_vth=gilbert_vth,
+            gilbert_drifted_velocity=gilbert_drifted_velocity
+        ))
+
+    def load_particles(self, h5_fp, prefix, dtype_X, dtype_U, particles):
+        gilbert_n_particles = particles['gilbert_n_particles']
+
         end_indices = gilbert_n_particles.cumsum() - 1
         start_indices = np.empty_like(end_indices).astype(int)
         start_indices[0] = 0
         start_indices[1:] = end_indices[:-1] + 1
 
-        n_particles = gilbert_n_particles.sum()
+        self.distribute_maxwellian(
+            h5_fp, prefix, start_indices, end_indices,
+            np.array(self.gilbert_curve, dtype=np.int16),
+            get_v_table(), particles, dtype_X, dtype_U
+        )
 
-        X = np.random.random((n_particles, 3))
-        if dtype_X != X.dtype:
-            X = np.clip(X, 0, 1 - np.finfo(dtype_X).eps).astype(dtype_X)
-        C_idx = np.empty((n_particles, 3), dtype=np.int16)
-        U = np.empty((n_particles, 3), dtype=dtype_U)
+    def distribute_maxwellian(self, h5_fp, prefix, start_indices, end_indices,
+                              gilbert_curve, v_table, particles,
+                              dtype_X, dtype_U):
+        vth_list = particles['gilbert_vth']
+        velocity_list = particles['gilbert_drifted_velocity']
+        m = particles['m']
+        n_computational_to_physical = particles['n_computational_to_physical']
 
-        distribute_maxwellian(C_idx, U, start_indices, end_indices,
-                              np.array(self.gilbert_curve), gilbert_vth,
-                              gilbert_drifted_velocity)
+        axis_labels = ['x', 'y', 'z']
+        with h5py.File(h5_fp, 'a') as h5f:
+            kinetic_E = 0
+            for cell_index in range(gilbert_curve.shape[0]):
+                start = start_indices[cell_index]
+                end = end_indices[cell_index]
+                if start == end + 1:
+                    continue
+                vth = vth_list[cell_index]
+                velocity = velocity_list[cell_index]
+                cell_coords = gilbert_curve[cell_index]
 
-        particles.update(dict(
-            X=X,
-            U=U,
-            C_idx=C_idx,
-            gilbert_n_particles=gilbert_n_particles
-        ))
+                X, U, C_idx, U2 = _distribute_maxwellian(
+                    start, end, vth, velocity, cell_coords, v_table,
+                    dtype_X, dtype_U)
+
+                # serialize
+                X = np.nextafter(X + C_idx, C_idx)
+                for i, axis in enumerate(axis_labels):
+                    # X
+                    _path = f'{prefix}/position/{axis}'
+                    h5f[_path][start:end+1] = X[:, i]
+
+                    # U
+                    _path = f'{prefix}/momentum/{axis}'
+                    h5f[_path][start:end+1] = U[:, i]
+
+                # TODO: compute state
+
+                kinetic_E += 0.5 * m * U2 * n_computational_to_physical
+            particles['kinetic_E'] = kinetic_E
+
+            for i, axis in enumerate(axis_labels):
+                _path = f'{prefix}/position/{axis}'
+                h5f[_path][end+1:] = None
+
+                _path = f'{prefix}/momentum/{axis}'
+                h5f[_path][end+1:] = None

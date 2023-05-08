@@ -32,6 +32,8 @@ def distribute_random(C_idx, start_indices, end_indices, gilbert_curve):
 
 class RandomInitializer(BaseInitializer):
     def load_particles(self, dtype_X, dtype_U, particles, grid_config):
+        # TODO
+        raise NotImplementedError()
         initial_condition = grid_config.get('initial_condition', {})
         n_particles = initial_condition.get('n_particles', 0)
         n_particles = int(n_particles)
@@ -65,7 +67,7 @@ class RandomInitializer(BaseInitializer):
         C_idx = np.empty((n_particles, 3), dtype=np.int16)
 
         distribute_random(C_idx, start_indices, end_indices,
-                          np.array(self.gilbert_curve))
+                          np.array(self.gilbert_curve, dtype=np.int16))
 
         particles.update(dict(
             X=X,

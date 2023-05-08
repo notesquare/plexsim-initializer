@@ -1,6 +1,12 @@
-from .maxwellian import MaxwellianInitializer
+from .maxwellian import (
+    MaxwellianInitializer,
+    _distribute_maxwellian
+)
 from .random import RandomInitializer
 
 __all__ = (
-    'MaxwellianInitializer', 'RandomInitializer'
+    'MaxwellianInitializer',
+    '_distribute_maxwellian',
+
+    'RandomInitializer'
 )
