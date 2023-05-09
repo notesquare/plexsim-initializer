@@ -410,6 +410,9 @@ class BaseInitializer:
     def load_particles(self, dtype_X, dtype_U, particles, grid_config):
         raise NotImplementedError()
 
+    def load_particles_pre(self, particles, grid_config):
+        raise NotImplementedError()
+
     def split_in_balance(self, gilbert_n_particles, n_splits):
         n_particles = gilbert_n_particles.sum()
         n_cells = len(self.gilbert_curve)

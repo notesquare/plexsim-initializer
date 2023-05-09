@@ -134,14 +134,13 @@ class MaxwellianInitializer(BaseInitializer):
         axis_labels = ['x', 'y', 'z']
         with h5py.File(h5_fp, 'a') as h5f:
             kinetic_E = 0
-            for cell_index in range(gilbert_curve.shape[0]):
+            for cell_index, cell_coords in enumerate(gilbert_curve):
                 start = start_indices[cell_index]
                 end = end_indices[cell_index]
                 if start == end + 1:
                     continue
                 vth = vth_list[cell_index]
                 velocity = velocity_list[cell_index]
-                cell_coords = gilbert_curve[cell_index]
 
                 X, U, C_idx, U2 = _distribute_maxwellian(
                     start, end, vth, velocity, cell_coords, v_table,
