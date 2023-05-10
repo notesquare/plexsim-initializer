@@ -3,32 +3,28 @@ import numpy as np
 from mpi4py import MPI
 from mpi4py.futures import MPIPoolExecutor
 
+from .common import gen_arg
 from ...initializers import (
     MaxwellianInitializer as _MaxwellianInitializer,
     _distribute_maxwellian
 )
 
 
-def pool_initialize(h5_fp, _prefix, _v_table, _dtype_X, _dtype_U):
+def distribute_and_serialize(start, end, vth, velocity, cell_coords, h5_fp,
+                             _prefix, _v_table, _dtype_X, _dtype_U):
     global h5f
-    h5f = h5py.File(h5_fp, 'a', driver='mpio', comm=MPI.COMM_WORLD)
-
     global prefix
-    prefix = _prefix
-    global v_table
-    v_table = _v_table
-    global dtype_X
-    dtype_X = _dtype_X
-    global dtype_U
-    dtype_U = _dtype_U
-
-
-def distribute_and_serialize(start, end, vth, velocity, cell_coords):
-    global h5f
     global v_table
     global dtype_X
     global dtype_U
-    global prefix
+
+    if h5_fp is not None:
+        h5_comm = MPI.COMM_WORLD.Split(0)
+        h5f = h5py.File(h5_fp, 'a', driver='mpio', comm=h5_comm)
+        prefix = _prefix
+        v_table = _v_table
+        dtype_X = _dtype_X
+        dtype_U = _dtype_U
 
     is_exist = (start is not None) and (start <= end)
     if is_exist:
@@ -63,7 +59,7 @@ def distribute_and_serialize(start, end, vth, velocity, cell_coords):
     return U2
 
 
-def pool_deinitialize(*args):
+def pool_finalize(*args):
     global h5f
     h5f.close()
 
@@ -71,38 +67,39 @@ def pool_deinitialize(*args):
 class MaxwellianInitializer(_MaxwellianInitializer):
     def distribute_maxwellian(self, h5_fp, prefix, start_indices, end_indices,
                               gilbert_curve, v_table, particles,
-                              dtype_X, dtype_U, n_workers=50):
+                              dtype_X, dtype_U):
         vth_list = particles['gilbert_vth']
         velocity_list = particles['gilbert_drifted_velocity']
         m = particles['m']
         n_computational_to_physical = particles['n_computational_to_physical']
 
-        executor = MPIPoolExecutor(
-            max_workers=n_workers,
-            initializer=pool_initialize,
-            initargs=(h5_fp, prefix, v_table, dtype_X, dtype_U)
-        )
-        n_tasks = gilbert_curve.shape[0]
-        mod = n_tasks % n_workers
-        if mod != 0:
-            n_paddings = n_workers - mod
+        with MPIPoolExecutor() as executor:
+            n_workers = MPI.COMM_WORLD.Get_size() - 1
+            n_tasks = gilbert_curve.shape[0]
+            mod = n_tasks % n_workers
+            if mod != 0:
+                n_paddings = n_workers - mod
 
-            start_indices = list(start_indices) + [None] * n_paddings
-            end_indices = list(end_indices) + [None] * n_paddings
-            vth_list = list(vth_list) + [None] * n_paddings
-            velocity_list = list(velocity_list) + [None] * n_paddings
-            gilbert_curve = list(gilbert_curve) + [None] * n_paddings
+                start_indices = list(start_indices) + [None] * n_paddings
+                end_indices = list(end_indices) + [None] * n_paddings
+                vth_list = list(vth_list) + [None] * n_paddings
+                velocity_list = list(velocity_list) + [None] * n_paddings
+                gilbert_curve = list(gilbert_curve) + [None] * n_paddings
 
-        U2 = executor.map(
-            distribute_and_serialize, start_indices, end_indices,
-            vth_list, velocity_list, gilbert_curve
-        )
-        kinetic_E = 0.5 * m * sum(list(U2)) * n_computational_to_physical
+            U2 = executor.map(
+                distribute_and_serialize, start_indices, end_indices,
+                vth_list, velocity_list, gilbert_curve,
+                gen_arg(h5_fp, n_workers), gen_arg(prefix, n_workers),
+                gen_arg(v_table, n_workers), gen_arg(dtype_X, n_workers),
+                gen_arg(dtype_U, n_workers)
+            )
+            MPI.COMM_WORLD.Split(MPI.UNDEFINED, 0)
+            kinetic_E = 0.5 * m * sum(list(U2)) * n_computational_to_physical
 
-        particles['kinetic_E'] = kinetic_E
+            particles['kinetic_E'] = kinetic_E
 
-        for _ in executor.map(pool_deinitialize, range(n_workers)):
-            pass
+            for _ in executor.map(pool_finalize, range(n_workers)):
+                pass
 
         axis_labels = ['x', 'y', 'z']
         with h5py.File(h5_fp, 'a') as h5f:
