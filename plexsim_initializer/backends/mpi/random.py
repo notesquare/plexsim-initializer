@@ -2,6 +2,7 @@ import h5py
 import numpy as np
 from mpi4py import MPI
 from mpi4py.futures import MPIPoolExecutor
+from mpi4py.futures._lib import get_max_workers
 
 from .common import (
     create_shm_array,
@@ -28,13 +29,20 @@ def distribute_and_serialize(start, end, cell_coords, h5_fp,
     global save_state
 
     if h5_fp is not None:
-        h5_comm = MPI.COMM_WORLD.Split(0)
-        h5f = h5py.File(h5_fp, 'a', driver='mpio', comm=h5_comm)
+        # init
         prefix = _prefix
         dtype_X = _dtype_X
         dtype_U = _dtype_U
         avg_velocity = _avg_velocity
         save_state = _save_state
+
+        if MPI.Comm.Get_parent() == MPI.COMM_NULL:
+            # static mode
+            h5_comm = MPI.COMM_WORLD.Split(0)
+        else:
+            # dynamic mode
+            h5_comm = MPI.COMM_WORLD
+        h5f = h5py.File(h5_fp, 'a', driver='mpio', comm=h5_comm)
 
         if save_state:
             if h5_comm.Get_rank() == 0:
@@ -111,12 +119,20 @@ class RandomInitializer(_RandomInitializer):
         m = particles['m']
         n_computational_to_physical = particles['n_computational_to_physical']
 
-        with MPIPoolExecutor() as executor:
-            n_workers = MPI.COMM_WORLD.Get_size() - 1
+        if MPI.COMM_WORLD.Get_size() > 1:
+            # static mode
+            max_workers = MPI.COMM_WORLD.Get_size() - 1
+        else:
+            # dynamic mode
+            max_workers = get_max_workers()
+            if max_workers < 1:
+                max_workers = 1
+
+        with MPIPoolExecutor(max_workers=max_workers) as executor:
             n_tasks = gilbert_curve.shape[0]
-            mod = n_tasks % n_workers
+            mod = n_tasks % max_workers
             if mod != 0:
-                n_paddings = n_workers - mod
+                n_paddings = max_workers - mod
 
                 start_indices = list(start_indices) + [None] * n_paddings
                 end_indices = list(end_indices) + [None] * n_paddings
@@ -124,18 +140,21 @@ class RandomInitializer(_RandomInitializer):
 
             U2 = executor.map(
                 distribute_and_serialize, start_indices, end_indices,
-                gilbert_curve, gen_arg(h5_fp, n_workers),
-                gen_arg(prefix, n_workers), gen_arg(avg_velocity, n_workers),
-                gen_arg(dtype_X, n_workers), gen_arg(dtype_U, n_workers),
-                gen_arg(self.grid_shape, n_workers),
-                gen_arg(self.save_state, n_workers)
+                gilbert_curve, gen_arg(h5_fp, max_workers),
+                gen_arg(prefix, max_workers),
+                gen_arg(avg_velocity, max_workers),
+                gen_arg(dtype_X, max_workers), gen_arg(dtype_U, max_workers),
+                gen_arg(self.grid_shape, max_workers),
+                gen_arg(self.save_state, max_workers)
             )
-            MPI.COMM_WORLD.Split(MPI.UNDEFINED, 0)
+            if MPI.COMM_WORLD.Get_size() > 1:
+                # static mode
+                MPI.COMM_WORLD.Split(MPI.UNDEFINED, 0)
             kinetic_E = 0.5 * m * sum(list(U2)) * n_computational_to_physical
 
             particles['kinetic_E'] = kinetic_E
 
-            for state in executor.map(pool_finalize, range(n_workers)):
+            for state in executor.map(pool_finalize, range(max_workers)):
                 grid_n_d, grid_U_d, grid_U2_d = state
                 if grid_n_d is not None:
                     particles.update(dict(
