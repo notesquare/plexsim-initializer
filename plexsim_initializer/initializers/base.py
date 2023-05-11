@@ -10,7 +10,7 @@ from ..lib.gilbert3d import gilbert3d
 from ..lib.common import (
     SavedFlag,
     node_to_center_3d,
-    compute_grid_velocity,
+    conv3d_array,
     remove_cycle_pattern_from_filename
 )
 
@@ -901,19 +901,21 @@ class BaseInitializer:
 
         axis_labels = [np.string_(v) for v in ['x', 'y', 'z']]
         for grid_index, grid_values in self.particles.items():
-            X = grid_values['X']
-            U = grid_values['U']
-            C_idx = grid_values['C_idx']
             q = grid_values['q']
             m = grid_values['m']
             n_computational_to_physical = \
                 grid_values['n_computational_to_physical']
+            grid_n_d = grid_values['grid_n_d']
+            grid_U_d = grid_values['grid_U_d']
+            grid_U2_d = grid_values['grid_U2_d']
 
-            grid_n = np.zeros((self.grid_shape + 1), dtype=np.float32)
-            grid_U = np.zeros((*(self.grid_shape + 1), 3), dtype=np.float32)
-            grid_U2 = np.zeros((self.grid_shape + 1), dtype=np.float32)
+            grid_n = np.zeros((self.grid_shape + 1), dtype=np.float64)
+            grid_U = np.zeros((*(self.grid_shape + 1), 3), dtype=np.float64)
+            grid_U2 = np.zeros((self.grid_shape + 1), dtype=np.float64)
 
-            compute_grid_velocity(X, U, C_idx, grid_n, grid_U, grid_U2)
+            conv3d_array(grid_n, [grid_n_d])
+            conv3d_array(grid_U, [grid_U_d])
+            conv3d_array(grid_U2, [grid_U2_d])
 
             mask = grid_n > density_threshold
             grid_U[mask] = np.divide(grid_U[mask],

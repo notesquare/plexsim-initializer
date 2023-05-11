@@ -3,6 +3,7 @@ import numpy as np
 import h5py
 
 from .base import BaseInitializer
+from ..lib.common import compute_grid_velocity_disjunct
 
 
 @njit
@@ -85,6 +86,11 @@ class RandomInitializer(BaseInitializer):
         m = particles['m']
         n_computational_to_physical = particles['n_computational_to_physical']
 
+        if self.save_state:
+            grid_n_d = np.zeros((self.grid_shape * 2), dtype=np.float64)
+            grid_U_d = np.zeros((*(self.grid_shape * 2), 3), dtype=np.float64)
+            grid_U2_d = np.zeros((self.grid_shape * 2), dtype=np.float64)
+
         axis_labels = ['x', 'y', 'z']
         with h5py.File(h5_fp, 'a') as h5f:
             kinetic_E = 0
@@ -98,6 +104,9 @@ class RandomInitializer(BaseInitializer):
                     start, end, avg_velocity, cell_coords, dtype_X, dtype_U
                 )
 
+                if self.save_state:
+                    compute_grid_velocity_disjunct(
+                        X, U, C_idx, grid_n_d, grid_U_d, grid_U2_d)
                 # serialize
                 X = np.nextafter(X + C_idx, C_idx)
                 for i, axis in enumerate(axis_labels):
@@ -109,10 +118,14 @@ class RandomInitializer(BaseInitializer):
                     _path = f'{prefix}/momentum/{axis}'
                     h5f[_path][start:end+1] = U[:, i]
 
-                # TODO: compute state
-
                 kinetic_E += 0.5 * m * U2 * n_computational_to_physical
             particles['kinetic_E'] = kinetic_E
+            if self.save_state:
+                particles.update(dict(
+                    grid_n_d=grid_n_d,
+                    grid_U_d=grid_U_d,
+                    grid_U2_d=grid_U2_d
+                ))
 
             for i, axis in enumerate(axis_labels):
                 _path = f'{prefix}/position/{axis}'
