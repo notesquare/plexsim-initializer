@@ -4,15 +4,12 @@ from mpi4py import MPI
 from mpi4py.futures import MPIPoolExecutor
 from mpi4py.futures._lib import get_max_workers
 
-from .common import (
-    create_shm_array,
-    gen_arg
-)
+from .common import gen_arg
 from ...initializers import (
     MaxwellianInitializer as _MaxwellianInitializer,
     _distribute_maxwellian
 )
-from ...lib.common import compute_grid_velocity_disjunct
+from ...lib.common import compute_grid_velocity
 
 
 def distribute_and_serialize(start, end, vth, velocity, cell_coords, h5_fp,
@@ -23,9 +20,9 @@ def distribute_and_serialize(start, end, vth, velocity, cell_coords, h5_fp,
     global v_table
     global dtype_X
     global dtype_U
-    global grid_n_d
-    global grid_U_d
-    global grid_U2_d
+    global grid_n
+    global grid_U
+    global grid_U2
     global save_state
 
     if h5_fp is not None:
@@ -45,21 +42,9 @@ def distribute_and_serialize(start, end, vth, velocity, cell_coords, h5_fp,
         h5f = h5py.File(h5_fp, 'a', driver='mpio', comm=h5_comm)
 
         if save_state:
-            if h5_comm.Get_rank() == 0:
-                grid_n_d = create_shm_array(
-                    (grid_shape * 2), h5_comm, data=np.float64(0), main=True)
-                grid_U_d = create_shm_array(
-                    (*(grid_shape * 2), 3), h5_comm,
-                    data=np.float64(0), main=True)
-                grid_U2_d = create_shm_array(
-                    (grid_shape * 2), h5_comm, data=np.float64(0), main=True)
-            else:
-                grid_n_d = create_shm_array(
-                    (grid_shape * 2), h5_comm, dtype=np.float64)
-                grid_U_d = create_shm_array(
-                    (*(grid_shape * 2), 3), h5_comm, dtype=np.float64)
-                grid_U2_d = create_shm_array(
-                    (grid_shape * 2), h5_comm, dtype=np.float64)
+            grid_n = np.zeros((grid_shape + 1), dtype=np.float64)
+            grid_U = np.zeros((*(grid_shape + 1), 3), dtype=np.float64)
+            grid_U2 = np.zeros((grid_shape + 1), dtype=np.float64)
 
     is_exist = (start is not None) and (start <= end)
     if is_exist:
@@ -67,8 +52,8 @@ def distribute_and_serialize(start, end, vth, velocity, cell_coords, h5_fp,
             start, end, vth, velocity, cell_coords, v_table, dtype_X, dtype_U)
 
         if save_state:
-            compute_grid_velocity_disjunct(
-                X, U, C_idx, grid_n_d, grid_U_d, grid_U2_d)
+            compute_grid_velocity(
+                X, U, C_idx, grid_n, grid_U, grid_U2)
 
         X = np.nextafter(X + C_idx, C_idx)
     else:
@@ -97,17 +82,17 @@ def distribute_and_serialize(start, end, vth, velocity, cell_coords, h5_fp,
     return U2
 
 
-def pool_finalize(index):
+def pool_finalize(*args):
     global h5f
-    global grid_n_d
-    global grid_U_d
-    global grid_U2_d
+    global grid_n
+    global grid_U
+    global grid_U2
     global save_state
 
     h5f.close()
 
-    if save_state and index == 0:
-        return grid_n_d, grid_U_d, grid_U2_d
+    if save_state:
+        return grid_n, grid_U, grid_U2
     else:
         return None, None, None
 
@@ -120,6 +105,11 @@ class MaxwellianInitializer(_MaxwellianInitializer):
         velocity_list = particles['gilbert_drifted_velocity']
         m = particles['m']
         n_computational_to_physical = particles['n_computational_to_physical']
+
+        if self.save_state:
+            grid_n = np.zeros((self.grid_shape + 1), dtype=np.float64)
+            grid_U = np.zeros((*(self.grid_shape + 1), 3), dtype=np.float64)
+            grid_U2 = np.zeros((self.grid_shape + 1), dtype=np.float64)
 
         if MPI.COMM_WORLD.Get_size() > 1:
             # static mode
@@ -161,13 +151,18 @@ class MaxwellianInitializer(_MaxwellianInitializer):
             particles['kinetic_E'] = kinetic_E
 
             for state in executor.map(pool_finalize, range(max_workers)):
-                grid_n_d, grid_U_d, grid_U2_d = state
-                if grid_n_d is not None:
-                    particles.update(dict(
-                        grid_n_d=grid_n_d,
-                        grid_U_d=grid_U_d,
-                        grid_U2_d=grid_U2_d
-                    ))
+                if self.save_state:
+                    _grid_n, _grid_U, _grid_U2 = state
+                    grid_n += _grid_n
+                    grid_U += _grid_U
+                    grid_U2 += _grid_U2
+
+        if self.save_state:
+            particles.update(dict(
+                grid_n=grid_n,
+                grid_U=grid_U,
+                grid_U2=grid_U2
+            ))
 
         axis_labels = ['x', 'y', 'z']
         with h5py.File(h5_fp, 'a') as h5f:
