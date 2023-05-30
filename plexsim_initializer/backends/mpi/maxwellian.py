@@ -98,6 +98,21 @@ def pool_finalize(*args):
 
 
 class MaxwellianInitializer(_MaxwellianInitializer):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        if MPI.COMM_WORLD.Get_size() > 1:
+            # static mode
+            max_workers = MPI.COMM_WORLD.Get_size() - 1
+        else:
+            # dynamic mode
+            max_workers = get_max_workers()
+            if max_workers < 1:
+                max_workers = 1
+
+        self.max_workers = max_workers
+        self.executor = MPIPoolExecutor(max_workers=max_workers)
+
     def distribute_maxwellian(self, h5_fp, prefix, start_indices, end_indices,
                               gilbert_curve, v_table, particles,
                               dtype_X, dtype_U):
@@ -111,51 +126,42 @@ class MaxwellianInitializer(_MaxwellianInitializer):
             grid_U = np.zeros((*(self.grid_shape + 1), 3), dtype=np.float64)
             grid_U2 = np.zeros((self.grid_shape + 1), dtype=np.float64)
 
+        max_workers = self.max_workers
+        n_tasks = gilbert_curve.shape[0]
+        mod = n_tasks % max_workers
+        if mod != 0:
+            n_paddings = max_workers - mod
+
+            start_indices = list(start_indices) + [None] * n_paddings
+            end_indices = list(end_indices) + [None] * n_paddings
+            vth_list = list(vth_list) + [None] * n_paddings
+            velocity_list = list(velocity_list) + [None] * n_paddings
+            gilbert_curve = list(gilbert_curve) + [None] * n_paddings
+
+        U2 = self.executor.map(
+            distribute_and_serialize, start_indices, end_indices,
+            vth_list, velocity_list, gilbert_curve,
+            gen_arg(h5_fp, max_workers),
+            gen_arg(prefix, max_workers),
+            gen_arg(v_table, max_workers),
+            gen_arg(dtype_X, max_workers),
+            gen_arg(dtype_U, max_workers),
+            gen_arg(self.grid_shape, max_workers),
+            gen_arg(self.save_state, max_workers)
+        )
         if MPI.COMM_WORLD.Get_size() > 1:
             # static mode
-            max_workers = MPI.COMM_WORLD.Get_size() - 1
-        else:
-            # dynamic mode
-            max_workers = get_max_workers()
-            if max_workers < 1:
-                max_workers = 1
+            MPI.COMM_WORLD.Split(MPI.UNDEFINED, 0)
+        kinetic_E = 0.5 * m * sum(list(U2)) * n_computational_to_physical
 
-        with MPIPoolExecutor(max_workers=max_workers) as executor:
-            n_tasks = gilbert_curve.shape[0]
-            mod = n_tasks % max_workers
-            if mod != 0:
-                n_paddings = max_workers - mod
+        particles['kinetic_E'] = kinetic_E
 
-                start_indices = list(start_indices) + [None] * n_paddings
-                end_indices = list(end_indices) + [None] * n_paddings
-                vth_list = list(vth_list) + [None] * n_paddings
-                velocity_list = list(velocity_list) + [None] * n_paddings
-                gilbert_curve = list(gilbert_curve) + [None] * n_paddings
-
-            U2 = executor.map(
-                distribute_and_serialize, start_indices, end_indices,
-                vth_list, velocity_list, gilbert_curve,
-                gen_arg(h5_fp, max_workers),
-                gen_arg(prefix, max_workers),
-                gen_arg(v_table, max_workers),
-                gen_arg(dtype_X, max_workers),
-                gen_arg(dtype_U, max_workers),
-                gen_arg(self.grid_shape, max_workers),
-                gen_arg(self.save_state, max_workers)
-            )
-            if MPI.COMM_WORLD.Get_size() > 1:
-                # static mode
-                MPI.COMM_WORLD.Split(MPI.UNDEFINED, 0)
-            kinetic_E = 0.5 * m * sum(list(U2)) * n_computational_to_physical
-
-            particles['kinetic_E'] = kinetic_E
-
-            for state in executor.map(pool_finalize, range(max_workers)):
-                if self.save_state:
-                    _grid_n, _grid_U, _grid_U2 = state
-                    grid_n += _grid_n
-                    grid_U += _grid_U
-                    grid_U2 += _grid_U2
+        for state in self.executor.map(pool_finalize, range(max_workers)):
+            if self.save_state:
+                _grid_n, _grid_U, _grid_U2 = state
+                grid_n += _grid_n
+                grid_U += _grid_U
+                grid_U2 += _grid_U2
 
         if self.save_state:
             particles.update(dict(
