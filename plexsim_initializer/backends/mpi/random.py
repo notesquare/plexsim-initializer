@@ -1,10 +1,8 @@
 import h5py
 import numpy as np
 from mpi4py import MPI
-from mpi4py.futures import MPIPoolExecutor
-from mpi4py.futures._lib import get_max_workers
 
-from .common import gen_arg
+from .common import gen_arg, MPIInitializer
 from ...initializers import (
     RandomInitializer as _RandomInitializer,
     _distribute_random
@@ -97,21 +95,9 @@ def pool_finalize(*args):
         return None, None, None
 
 
-class RandomInitializer(_RandomInitializer):
+class RandomInitializer(MPIInitializer, _RandomInitializer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-
-        if MPI.COMM_WORLD.Get_size() > 1:
-            # static mode
-            max_workers = MPI.COMM_WORLD.Get_size() - 1
-        else:
-            # dynamic mode
-            max_workers = get_max_workers()
-            if max_workers < 1:
-                max_workers = 1
-
-        self.max_workers = max_workers
-        self.executor = MPIPoolExecutor(max_workers=max_workers)
 
     def distribute_random(self, h5_fp, prefix, start_indices, end_indices,
                           gilbert_curve, particles, dtype_X, dtype_U):

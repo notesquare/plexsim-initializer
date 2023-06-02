@@ -5,32 +5,13 @@ From: base.img
   ../dist/plexsim_initializer-*.whl /
 
 %post
-  export PYTHON_VERSION=3.9.12
-  export NUMBA_VERSION=0.55.2
-  export NUMPY_VERSION=1.22.4
-
-  apt-get update && apt-get install -y libpmi2-0 && rm -rf /var/lib/apt/lists/*
-
-  micromamba install --quiet --yes -n base \
-    --channel conda-forge \
-    libnuma \
-    "python=$PYTHON_VERSION" \
-    numba=${NUMBA_VERSION} \
-    numpy=${NUMPY_VERSION} \
-    tqdm pyyaml
-  micromamba clean --all -f -y
-
-  export PATH="/opt/conda/bin:$PATH"
-
   LATEST_WHEEL=$(find / -maxdepth 1 -type f -name "plexsim_initializer-*.whl" | sort --version-sort | tail -n 1)
   echo "Installing $LATEST_WHEEL"
   pip install --no-cache-dir $LATEST_WHEEL
   rm /plexsim_initializer-*.whl
 
-%environment
-  export PATH="/opt/ompi/bin/:/opt/conda/bin:$PATH"
-  export LD_LIBRARY_PATH="/opt/ompi/lib:/opt/ucx/lib:/opt/conda/lib:$LD_LIBRARY_PATH:/opt/slurm/lib:/opt/slurm/lib/slurm:/opt/extra/lib1"
-  export PYTHONPATH="/site-packages"
-
 %runscript
   python -m plexsim_initializer "$@"
+
+%environment
+  LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/host_slurm_lib:/host_slurm_lib/slurm:/host_usr_lib:/host_usr_lib/x86_64-linux-gnu

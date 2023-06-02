@@ -1,100 +1,36 @@
-Bootstrap: docker
-From: mambaorg/micromamba:1.4-focal
+# minimize
+Bootstrap: localimage
+From: base_2.img
 Stage: build
-
-%post -c /bin/bash
-  set -e
-
-  apt-get update && apt-get install -y wget gcc g++ make build-essential \
-    zlib1g-dev libnl-3-dev libnl-route-3-dev libpmi2-0-dev
-
-  export PYTHON_VERSION=3.9.12
-  export MPI4PY_VERSION=3.1.4
-  export OMPI_VERSION=4.1.1
-  export HDF5_VERSION=1.12.2
-  export NUMPY_VERSION=1.22.4
-  export UCX_VERSION=1.14.0
-  export H5PY_VERSION=3.8.0
-  export HDF5PLUGIN_VERSION=3.3.1
-
-  micromamba install --quiet --yes -n base \
-    --channel conda-forge \
-    mamba \
-    "python=$PYTHON_VERSION" \
-    cython
-  micromamba clean --all -f -y
-
-  export PATH="/opt/conda/bin:$PATH"
-
-  # Install UCX
-  export UCX_DIR=/opt/ucx
-
-  mkdir -p /opt/tmp/ucx && cd /opt/tmp/ucx \
-    && wget -O- "https://github.com/openucx/ucx/releases/download/v$UCX_VERSION/ucx-$UCX_VERSION.tar.gz" | tar -xz --strip-components=1 \
-    && mkdir build && cd build \
-    && ../configure --prefix=$UCX_DIR \
-    && make -j 16 install
-
-  # Build OpenMPI
-  export OMPI_DIR=/opt/ompi
-
-  mkdir -p /opt/tmp/ompi && cd /opt/tmp/ompi \
-    && wget -O- "https://download.open-mpi.org/release/open-mpi/v${OMPI_VERSION%.*}/openmpi-$OMPI_VERSION.tar.bz2" | tar -xj --strip-components=1 \
-    && ./configure --prefix=$OMPI_DIR \
-      --enable-shared --without-tm \
-      --disable-wrapper-runpath \
-      --enable-mpirun-prefix-by-default \
-      --with-libevent=internal \
-      --without-libnl \
-      --with-slurm --with-pmi \
-      --enable-mca-no-build=btl-uct --without-verbs \
-      --with-ucx=/opt/ucx \
-    && make -j 16 install
-
-  export PATH="/opt/ompi/bin/:$PATH"
-  export LD_LIBRARY_PATH="/opt/ompi/lib:/opt/conda/lib:$LD_LIBRARY_PATH"
-
-  # Build hdf5 with parallel
-  export HDF5_DIR=/opt/hdf5
-
-  mkdir -p /opt/tmp/hdf5 && cd /opt/tmp/hdf5 \
-    && wget -O- "https://support.hdfgroup.org/ftp/HDF5/releases/hdf5-${HDF5_VERSION%.*}/hdf5-$HDF5_VERSION/src/hdf5-$HDF5_VERSION.tar.bz2" | tar -xj --strip-components=2 \
-    && CC=$OMPI_DIR/bin/mpicc ./configure \
-      --enable-parallel \
-      --enable-shared \
-      --prefix=$HDF5_DIR \
-    && make -j 16 install
-
-  # Build MPI4PY
-  pip install --no-binary=mpi4py --target /site-packages \
-    mpi4py==$MPI4PY_VERSION
-
-  # install h5py and hdf5plugin
-  pip install numpy==$NUMPY_VERSION
-
-  export PYTHONPATH="/site-packages:$PYTHONPATH"
-
-  CC=$OMPI_DIR/bin/mpicc HDF5_MPI=ON HDF5_DIR=$HDF5_DIR H5PY_SETUP_REQUIRES=0 \
-    pip install --no-binary=h5py --no-deps --no-build-isolation --target /site-packages \
-    h5py==$H5PY_VERSION \
-    hdf5plugin==$HDF5PLUGIN_VERSION
-
 
 Bootstrap: docker
 From: mambaorg/micromamba:1.4-focal
 Stage: prod
 
 %files from build
-  /opt/ucx
-  /opt/ompi
-  /opt/hdf5
-  /site-packages
+  /opt/conda/
+  /opt/ucx/
+  /opt/ompi/
+  /opt/hdf5/
+  /site-packages/
 
-# %post
-#   # delete unnecessary packages
-#   rm -rf /site-packages/numpy* /site-packages/bin
+%post -c /bin/bash
+  set -e
+  # openssh-client
+  apt-get update && apt-get install -y libnuma1 && rm -rf /var/lib/apt/lists/
+
+  export PATH="/opt/ompi/bin/:/opt/conda/bin:$PATH"
+  export NUMBA_VERSION=0.55.2
+  export NUMPY_VERSION=1.22.4
+
+  micromamba install --quiet --yes -n base \
+    --channel conda-forge \
+    numba=${NUMBA_VERSION} \
+    numpy=${NUMPY_VERSION} \
+    tqdm pyyaml
+  mamba clean --all -f -y
 
 %environment
   export PATH="/opt/ompi/bin/:/opt/conda/bin:$PATH"
-  export LD_LIBRARY_PATH="/opt/ompi/lib:/opt/conda/lib:/opt/ucx/lib:$LD_LIBRARY_PATH"
+  export LD_LIBRARY_PATH="/opt/ompi/lib:/opt/conda/lib:/opt/ucx/lib:/opt/hdf5/lib:$LD_LIBRARY_PATH"
   export PYTHONPATH="/site-packages"
