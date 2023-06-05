@@ -2,16 +2,18 @@ initializer: maxwellian
 
 environment:
   coordinate_system: cartesian
-  grid_shape: [138, 138, 64]
-  cell_size: [0.00925644, 0.00925644, 0.01144227]
-  external_magnetic_field: ../common/B.npy
+  grid_shape: [70, 70, 32]
+  cell_size: [0.01824841, 0.01824841, 0.02288454]
+  external_magnetic_field: ./data/new-consistent-input-reduced-external/B.npy
   induced_magnetic_field: [0, 0, 0]
   external_electric_field: [0, 0, 0]
   induced_electric_field: [0, 0, 0]
   field_dtype: fp64
   valid_cell_coords: ../common/valid_cell_coords.npy
-  constant_field_node_coords: ../common/constant_field_node_coords.npy
-  constant_field_center_coords: ../common/constant_field_center_coords.npy
+  constant_external_field_node_coords: ../common/constant_external_field_node_coords.npy
+  constant_induced_field_node_coords: ../common/constant_induced_field_node_coords.npy
+  constant_external_field_center_coords: ../common/constant_external_field_center_coords.npy
+  constant_induced_field_center_coords: ../common/constant_induced_field_center_coords.npy
   relative_permittivity: 1
   relative_permeability: 1
 
@@ -24,9 +26,9 @@ grids:
     n_splits: 2
     n_computational_to_physical: 1.e+10
     initial_condition:
-      temperature: ./data/Te.npy  # [eV]
-      density: ./data/ne.npy  # [m^-3]
-      current_density: ./data/J.npy
+      temperature: ./data/new-consistent-input-reduced-external/Te.npy  # [eV]
+      density: ./data/new-consistent-input-reduced-external/ne.npy  # [m^-3]
+      current_density: ./data/new-consistent-input-reduced-external/J.npy
 
       tracking:
         n_particles: 20
@@ -40,8 +42,8 @@ grids:
     n_splits: 2
     n_computational_to_physical: 1.e+10
     initial_condition:
-      temperature: ./data/Ti.npy  # [eV]
-      density: ./data/ni.npy  # [m^-3]
+      temperature: ./data/new-consistent-input-reduced-external/Ti.npy  # [eV]
+      density: ./data/new-consistent-input-reduced-external/ni.npy  # [m^-3]
 
       tracking:
         n_particles: 20

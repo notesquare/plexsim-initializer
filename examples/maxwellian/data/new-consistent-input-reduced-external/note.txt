@@ -1,0 +1,19 @@
+본 파일은 consistent한 triassic 데이터로
+71x71x33 크기의 grid에서의 initializer input파일을 
+external B(=coil B)만을 이용해 만든 것임.
+
+
+노드 개수 : 71x71x33
+셀 개수  : 70x70x32
+grid shape : [0.01824841, 0.01824841, 0.02288454]
+
+
+j(para) ne ni Te Ti는 reduced-total B 케이스의 그것과 동일하며,
+특히 parallel j는 external B에 대해 구한 것이 아니라, CHEASE에서 얻어진 total B에 대한 parallel j임을 기억하자.
+
+
+*reduced은 그리드의 resolution이 줄어들었음을 의미함.
+사용해야하는 constant_field_coords 및 valid_cell_coords numpy 파일:
+'Valid_Coords 생성.ipynb' 파일에서 grid_shape 은 70, 70, 32로 수정하고
+R = 35, r = 3으로 수정해서 제작하면 된다. 혹은 본 폴더 내의 reduced_constant_field_coords.npy와
+reduced_valid_cell_coords.npy파일을 그대로 사용해도 된다.  
