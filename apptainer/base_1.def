@@ -1,0 +1,47 @@
+# UCX, OpenMPI, MPI4PY
+Bootstrap: localimage
+From: base_0.img
+
+%post -c /bin/bash
+  set -e
+
+  export OMPI_VERSION=4.1.1
+  export UCX_VERSION=1.9.0
+  export MPI4PY_VERSION=3.1.4
+
+  # Install UCX
+  export UCX_DIR=/opt/ucx
+
+  mkdir -p /opt/tmp/ucx && cd /opt/tmp/ucx \
+    && wget -O- "https://github.com/openucx/ucx/releases/download/v$UCX_VERSION/ucx-$UCX_VERSION.tar.gz" | tar -xz --strip-components=1 \
+    && mkdir build && cd build \
+    && ../configure --prefix=$UCX_DIR \
+    && make -j 16 install
+
+  # Build OpenMPI
+  export OMPI_DIR=/opt/ompi
+
+  mkdir -p /opt/tmp/ompi && cd /opt/tmp/ompi \
+    && wget -O- "https://download.open-mpi.org/release/open-mpi/v${OMPI_VERSION%.*}/openmpi-$OMPI_VERSION.tar.bz2" | tar -xj --strip-components=1 \
+    && ./configure --prefix=$OMPI_DIR \
+      --enable-shared --without-tm \
+      --disable-wrapper-runpath \
+      --enable-mpirun-prefix-by-default \
+      --with-libevent=internal \
+      --without-libnl \
+      --with-slurm --with-pmi \
+      --enable-mca-no-build=btl-uct --without-verbs \
+      --with-ucx=$UCX_DIR \
+    && make -j 16 install
+
+  # export LD_LIBRARY_PATH="$OMPI_DIR/lib:/opt/ucx/lib:$LD_LIBRARY_PATH"
+  # Build MPI4PY
+  CC=$OMPI_DIR/bin/mpicc MPICC=$OMPI_DIR/bin/mpicc \
+    pip install --no-cache-dir --target /site-packages \
+    mpi4py==$MPI4PY_VERSION
+
+%environment
+  export PATH="/opt/ompi/bin:$PATH"
+  export OMPI_DIR=/opt/ompi
+  export LD_LIBRARY_PATH="$OMPI_DIR/lib:/opt/ucx/lib:$LD_LIBRARY_PATH"
+  export PYTHONPATH="/site-packages"

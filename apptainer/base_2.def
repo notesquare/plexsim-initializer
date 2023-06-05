@@ -1,0 +1,33 @@
+# HDF5, h5py, hdf5plugin
+Bootstrap: localimage
+From: base_1.img
+
+%post -c /bin/bash
+  set -e
+
+  export HDF5_VERSION=1.12.2
+  export HDF5_DIR=/opt/hdf5
+  export NUMPY_VERSION=1.22.4
+  export H5PY_VERSION=3.8.0
+  export HDF5PLUGIN_VERSION=3.3.1
+
+  # Build hdf5 with parallel
+  export HDF5_DIR=/opt/hdf5
+  mkdir -p /opt/tmp/hdf5 && cd /opt/tmp/hdf5 \
+    && wget -O- "https://support.hdfgroup.org/ftp/HDF5/releases/hdf5-${HDF5_VERSION%.*}/hdf5-$HDF5_VERSION/src/hdf5-$HDF5_VERSION.tar.bz2" | tar -xj --strip-components=2 \
+    && CC=$OMPI_DIR/bin/mpicc ./configure \
+      --enable-parallel \
+      --enable-shared \
+      --prefix=$HDF5_DIR \
+    && make -j 16 install
+
+  # install h5py and hdf5plugin
+  pip install numpy==$NUMPY_VERSION
+
+  CC=$OMPI_DIR/bin/mpicc HDF5_MPI=ON HDF5_DIR=$HDF5_DIR H5PY_SETUP_REQUIRES=0 \
+    pip install --no-binary=h5py --no-deps --no-build-isolation --target /site-packages \
+    h5py==$H5PY_VERSION hdf5plugin==$HDF5PLUGIN_VERSION
+
+%environment
+  export LD_LIBRARY_PATH="/opt/hdf5/lib:$LD_LIBRARY_PATH"
+

@@ -1,0 +1,23 @@
+# Common setup
+Bootstrap: docker
+From: mambaorg/micromamba:1.4-focal
+
+%post -c /bin/bash
+  set -e
+
+  apt-get update && apt-get install -y wget gcc g++ make build-essential \
+    zlib1g-dev libnl-3-dev libnl-route-3-dev libpmi2-0-dev \
+    file libnuma-dev
+
+  export PYTHON_VERSION=3.9.12
+
+  micromamba install --quiet --yes -n base \
+    --channel conda-forge \
+    mamba \
+    "python=$PYTHON_VERSION" \
+    cython
+  micromamba clean --all -f -y
+
+%environment
+  export PATH="/opt/conda/bin:$PATH"
+  export LD_LIBRARY_PATH="/opt/conda/lib:$LD_LIBRARY_PATH"

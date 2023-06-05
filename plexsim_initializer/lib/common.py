@@ -74,7 +74,8 @@ def compute_grid_velocity(X, U, C_idx, grid_n, grid_U, grid_U2):
 
         weight = weight_function(X[i])
 
-        add_density_velocity(cell_index, U[i], grid_n, grid_U, grid_U2, weight)
+        add_density_velocity(
+            cell_index, U[i], grid_n, grid_U, grid_U2, weight)
 
 
 def remove_cycle_pattern_from_filename(fp):

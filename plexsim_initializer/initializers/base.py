@@ -10,7 +10,6 @@ from ..lib.gilbert3d import gilbert3d
 from ..lib.common import (
     SavedFlag,
     node_to_center_3d,
-    compute_grid_velocity,
     remove_cycle_pattern_from_filename
 )
 
@@ -188,7 +187,7 @@ class BaseInitializer:
         print('Number of particles generated:')
         for grid_index, data in self.particles.items():
             species = data['species']
-            print(f" {grid_index} ({species}) : {len(data['X']):,}")
+            print(f" {grid_index} ({species}) : {data['n_particles']:,}")
 
     def write_settings(self, h5_group, settings):
         for k, v in settings.items():
@@ -457,6 +456,9 @@ class BaseInitializer:
     def load_particles(self, dtype_X, dtype_U, particles, grid_config):
         raise NotImplementedError()
 
+    def load_particles_pre(self, particles, grid_config):
+        raise NotImplementedError()
+
     def split_in_balance(self, gilbert_n_particles, n_splits):
         n_particles = gilbert_n_particles.sum()
         n_cells = len(self.gilbert_curve)
@@ -545,12 +547,6 @@ class BaseInitializer:
     def setup_particles(self, h5f, iteration=0):
         flag = SavedFlag.particles
 
-        dimension = len(self.grid_shape)
-        if dimension == 3:
-            axis_labels = ['x', 'y', 'z']
-        else:
-            raise NotImplementedError(dimension)
-
         tracking_start_id = 1
         for grid_index, grid_config in enumerate(self.grids_config):
             # common vars
@@ -591,9 +587,7 @@ class BaseInitializer:
             else:
                 raise NotImplementedError()
 
-            # load particles
-            self.load_particles(dtype_X, dtype_U, self.particles[grid_index],
-                                grid_config)
+            self.load_particles_pre(self.particles[grid_index], grid_config)
 
             out_fp = Path(h5f.filename)
 
@@ -603,72 +597,44 @@ class BaseInitializer:
 
             p_path = f'data/{iteration}/particles/{particle_name}'
             with h5py.File(grid_fp, 'w') as grid_h5f:
-                p_group = grid_h5f.require_group(p_path)
+                particle_group = grid_h5f.require_group(p_path)
                 # custom attribute
-                p_group.attrs['_gridIndex'] = grid_index
-                p_group.attrs['_tracked'] = 0
+                particle_group.attrs['_gridIndex'] = grid_index
+                particle_group.attrs['_tracked'] = 0
 
                 particle_data = self.particles[grid_index]
                 self.write_particle_attrs(
-                    p_group, particle_data, n_splits,
-                    n_computational_to_physical)
+                    particle_group, particle_data, n_splits,
+                    n_computational_to_physical, dtype_X, dtype_U)
 
-                C_idx = particle_data['C_idx']
-                X = np.nextafter(particle_data['X'] + C_idx, C_idx)
-                U = particle_data['U']
-                self.serialize_particle(p_group, X, U, m)
+            self.load_particles(
+                grid_fp, p_path, dtype_X, dtype_U, self.particles[grid_index])
 
+            with h5py.File(grid_fp, 'a') as grid_h5f:
                 # create external link in
                 h5f[p_path] = h5py.ExternalLink(grid_fp, p_path)
 
                 # serialize tracking particles
                 n_track_particles = initial_condition.get('tracking', {}) \
                     .get('n_particles', 0)
+                n_particles = particle_data['n_particles']
+
+                if n_track_particles > n_particles:
+                    print('Warning: number of tracking particles cannot be'
+                          ' greater than number of particles.')
+                    n_track_particles = n_particles
+
                 if n_track_particles > 0:
                     tracked_path = f'{p_path}_tracked'
-
                     tracked_group = grid_h5f.require_group(tracked_path)
-                    # custom attribute
-                    tracked_group.attrs['_gridIndex'] = grid_index
-                    tracked_group.attrs['_tracked'] = 1
 
-                    n_particles = particle_data['X'].shape[0]
-
-                    tracked_attrs = self.get_particle_attrs(
-                        n_track_particles, q, m, axis_labels)
-                    tracked_attrs.update(dict(
-                        particleShape=3.0,
-                        currentDeposition=np.string_('none'),
-                        particlePush=np.string_('Boris'),
-                        particleInterpolation=np.string_('uniform'),
-                        particleSmoothing=np.string_('none')))
-
-                    self.write_settings(tracked_group, tracked_attrs)
-
-                    weighting_attrs = dict(
-                        macroWeighted=np.uint32(1),
-                        weightingPower=1.,
-                        timeOffset=0.,
-                        unitSI=np.float64(1),
-                        unitDimension=np.array(
-                            [0, 0, 0, 0, 0, 0, 0], dtype=np.float64)
+                    particle_group = grid_h5f.require_group(p_path)
+                    self.serialize_tracked(
+                        tracked_group, grid_index, n_track_particles, q, m,
+                        n_computational_to_physical, n_particles,
+                        tracking_start_id, particle_group
                     )
-                    tracked_group.create_dataset(
-                        'weighting', (n_track_particles,), dtype=np.float32,
-                        **self.create_dataset_kwargs)
-                    tracked_group['weighting'][:] = n_computational_to_physical
-                    self.write_settings(tracked_group['weighting'],
-                                        weighting_attrs)
 
-                    particle_indices = np.random.choice(
-                        n_particles, n_track_particles, False)
-                    tracking_ids = np.arange(
-                        tracking_start_id,
-                        tracking_start_id + n_track_particles,
-                        dtype=np.uint64)
-                    self.serialize_particle(
-                        tracked_group, X, U, m,
-                        tracking=(particle_indices, tracking_ids))
                     # create external link in
                     h5f[tracked_path] = h5py.ExternalLink(grid_fp,
                                                           tracked_path)
@@ -677,21 +643,19 @@ class BaseInitializer:
 
                     flag |= SavedFlag.tracked
 
-            # calculate and store kinetic_E
-            kinetic_E = 0.5 * m * (U * U).sum().item() \
-                * n_computational_to_physical
-            self.particles[grid_index]['kinetic_E'] = kinetic_E
         return flag
 
     def write_particle_attrs(self, h5_group, particle_data, n_splits,
-                             n_computational_to_physical):
-        n_particles = particle_data['X'].shape[0]
+                             n_computational_to_physical, dtype_X, dtype_U):
+        n_particles = particle_data['n_particles']
         q = particle_data['q']
         m = particle_data['m']
 
         dimension = len(self.grid_shape)
         if dimension == 3:
             axis_labels = ['x', 'y', 'z']
+        else:
+            raise NotImplementedError()
 
         particles_attrs = self.get_particle_attrs(n_particles, q, m,
                                                   axis_labels)
@@ -763,28 +727,82 @@ class BaseInitializer:
         h5_group['weighting'][:] = n_computational_to_physical
         self.write_settings(h5_group['weighting'], weighting_attrs)
 
-    def serialize_particle(self, h5_group, X, U, m, tracking=None):
-        # serialize X, U
-        if tracking is not None:
-            particle_indices, tracking_ids = tracking
-            h5_group.attrs['_particleIndices'] = particle_indices
-
-            h5_group.create_dataset('id', data=tracking_ids)
-            id_attr = dict(
-                unitSI=np.float64(1),
-                macroWeighted=np.uint32(1),
-                timeOffset=np.float64(0),
-                unitDimension=np.zeros(7, dtype=np.float64),
-                weightingPower=np.float64(0)
-            )
-            self.write_settings(h5_group['id'], id_attr)
-
-            X = X[list(particle_indices)]
-            U = U[list(particle_indices)]
-
-        _create_dataset_kwargs = self.create_dataset_kwargs.copy()
-        if X.shape[0] > self.chunk_size * 2:
+        # create dataset with size (n + 1,) for MPI collective serialization
+        _create_dataset_kwargs = {}
+        avg_n_particles = n_particles / len(self.gilbert_curve)
+        if avg_n_particles > self.chunk_size * 2:
+            _create_dataset_kwargs = self.create_dataset_kwargs.copy()
             _create_dataset_kwargs['chunks'] = (self.chunk_size,)
+        for axis in axis_labels:
+            # X
+            _path = f'position/{axis}'
+            h5_group.create_dataset(_path, (n_particles + 1, ),
+                                    dtype=dtype_X,
+                                    **_create_dataset_kwargs)
+            h5_group[_path].attrs['unitSI'] = np.float64(self.cell_size[i])
+
+            # U
+            _path = f'momentum/{axis}'
+            h5_group.create_dataset(_path, (n_particles + 1, ),
+                                    dtype=dtype_U,
+                                    **_create_dataset_kwargs)
+            h5_group[_path].attrs['unitSI'] = np.float64(m)
+
+    def serialize_tracked(self, tracked_group, grid_index, n_track_particles,
+                          q, m, n_computational_to_physical, n_particles,
+                          tracking_start_id, particle_group):
+        # custom attribute
+        tracked_group.attrs['_gridIndex'] = grid_index
+        tracked_group.attrs['_tracked'] = 1
+
+        axis_labels = ['x', 'y', 'z']
+        tracked_attrs = self.get_particle_attrs(
+            n_track_particles, q, m, axis_labels)
+        tracked_attrs.update(dict(
+            particleShape=3.0,
+            currentDeposition=np.string_('none'),
+            particlePush=np.string_('Boris'),
+            particleInterpolation=np.string_('uniform'),
+            particleSmoothing=np.string_('none')))
+
+        self.write_settings(tracked_group, tracked_attrs)
+
+        weighting_attrs = dict(
+            macroWeighted=np.uint32(1),
+            weightingPower=1.,
+            timeOffset=0.,
+            unitSI=np.float64(1),
+            unitDimension=np.array(
+                [0, 0, 0, 0, 0, 0, 0], dtype=np.float64)
+        )
+        _create_dataset_kwargs = self.create_dataset_kwargs.copy()
+        if n_track_particles > self.chunk_size * 2:
+            _create_dataset_kwargs['chunks'] = (self.chunk_size,)
+        tracked_group.create_dataset(
+            'weighting', (n_track_particles,), dtype=np.float32,
+            **_create_dataset_kwargs)
+        tracked_group['weighting'][:] = n_computational_to_physical
+        self.write_settings(tracked_group['weighting'],
+                            weighting_attrs)
+
+        particle_indices = np.random.choice(
+            n_particles, n_track_particles, False)
+        particle_indices.sort()
+        tracking_ids = np.arange(
+            tracking_start_id,
+            tracking_start_id + n_track_particles,
+            dtype=np.uint64)
+
+        tracked_group.attrs['_particleIndices'] = particle_indices
+        tracked_group.create_dataset('id', data=tracking_ids)
+        id_attr = dict(
+            unitSI=np.float64(1),
+            macroWeighted=np.uint32(1),
+            timeOffset=np.float64(0),
+            unitDimension=np.zeros(7, dtype=np.float64),
+            weightingPower=np.float64(0)
+        )
+        self.write_settings(tracked_group['id'], id_attr)
 
         dimension = len(self.grid_shape)
         if dimension == 3:
@@ -795,22 +813,19 @@ class BaseInitializer:
         for i, axis in enumerate(axis_labels):
             # X
             _path = f'position/{axis}'
-            h5_group.create_dataset(_path, data=X[:, i],
-                                    **_create_dataset_kwargs)
-
-            h5_group[_path].attrs['unitSI'] = np.float64(self.cell_size[i])
+            X = particle_group[_path]
+            tracked_group.create_dataset(_path, data=X[list(particle_indices)],
+                                         **_create_dataset_kwargs)
+            tracked_group[_path].attrs['unitSI'] = \
+                np.float64(self.cell_size[i])
 
             # U
-            # _path = f'velocity/{axis}'
-            # h5_group.create_dataset(_path, data=U[:, i],
-            #                         **_create_dataset_kwargs)
-            # h5_group[_path].attrs['unitSI'] = np.float64(1)
-
             # velocity is saved as momentum (required by openPMD)
             _path = f'momentum/{axis}'
-            h5_group.create_dataset(_path, data=U[:, i],
-                                    **_create_dataset_kwargs)
-            h5_group[_path].attrs['unitSI'] = np.float64(m)
+            U = particle_group[_path]
+            tracked_group.create_dataset(_path, data=U[list(particle_indices)],
+                                         **_create_dataset_kwargs)
+            tracked_group[_path].attrs['unitSI'] = np.float64(m)
 
     @property
     def magnetic_E(self):
@@ -846,8 +861,8 @@ class BaseInitializer:
         n_particles = []
         kinetic_E = []
         for grid in self.particles.values():
-            n_particles.append(grid['X'].shape[0])
-            kinetic_E.append(grid['kinetic_E'])
+            n_particles.append(grid['n_particles'])
+            kinetic_E.append(grid.get('kinetic_E'))
 
         stats_path = self.base_path(h5f, iteration) + np.string_('stats')
         stats_group = h5f.require_group(stats_path)
@@ -932,19 +947,13 @@ class BaseInitializer:
 
         axis_labels = [np.string_(v) for v in ['x', 'y', 'z']]
         for grid_index, grid_values in self.particles.items():
-            X = grid_values['X']
-            U = grid_values['U']
-            C_idx = grid_values['C_idx']
             q = grid_values['q']
             m = grid_values['m']
             n_computational_to_physical = \
                 grid_values['n_computational_to_physical']
-
-            grid_n = np.zeros((self.grid_shape + 1), dtype=np.float64)
-            grid_U = np.zeros((*(self.grid_shape + 1), 3), dtype=np.float64)
-            grid_U2 = np.zeros((self.grid_shape + 1), dtype=np.float64)
-
-            compute_grid_velocity(X, U, C_idx, grid_n, grid_U, grid_U2)
+            grid_n = grid_values['grid_n']
+            grid_U = grid_values['grid_U']
+            grid_U2 = grid_values['grid_U2']
 
             mask = grid_n > density_threshold
             grid_U[mask] = np.divide(grid_U[mask],

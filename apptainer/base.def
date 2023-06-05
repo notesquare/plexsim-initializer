@@ -1,0 +1,36 @@
+# minimize
+Bootstrap: localimage
+From: base_2.img
+Stage: build
+
+Bootstrap: docker
+From: mambaorg/micromamba:1.4-focal
+Stage: prod
+
+%files from build
+  /opt/conda/
+  /opt/ucx/
+  /opt/ompi/
+  /opt/hdf5/
+  /site-packages/
+
+%post -c /bin/bash
+  set -e
+  # openssh-client
+  apt-get update && apt-get install -y libnuma1 && rm -rf /var/lib/apt/lists/
+
+  export PATH="/opt/ompi/bin/:/opt/conda/bin:$PATH"
+  export NUMBA_VERSION=0.55.2
+  export NUMPY_VERSION=1.22.4
+
+  micromamba install --quiet --yes -n base \
+    --channel conda-forge \
+    numba=${NUMBA_VERSION} \
+    numpy=${NUMPY_VERSION} \
+    tqdm pyyaml
+  mamba clean --all -f -y
+
+%environment
+  export PATH="/opt/ompi/bin/:/opt/conda/bin:$PATH"
+  export LD_LIBRARY_PATH="/opt/ompi/lib:/opt/conda/lib:/opt/ucx/lib:/opt/hdf5/lib:$LD_LIBRARY_PATH"
+  export PYTHONPATH="/site-packages"
