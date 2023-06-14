@@ -564,13 +564,14 @@ class BaseInitializer:
             )
 
             if species == 'electron':
-                q = -1.602e-19
-                m = 9.11e-31
+                q = grid_config.get('q', -1.602e-19)
+                m = grid_config.get('m', 9.11e-31)
             elif species == 'ion':
-                q = 1.602e-19
-                m = 1.67e-27
+                q = grid_config.get('q', 1.602e-19)
+                m = grid_config.get('m', 1.67e-27)
             else:
-                raise NotImplementedError()
+                q = grid_config['q']
+                m = grid_config['m']
             self.particles[grid_index].update(dict(q=q, m=m))
 
             if dtype['X'] == 'fp32':
