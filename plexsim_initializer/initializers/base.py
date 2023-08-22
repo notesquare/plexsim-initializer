@@ -107,8 +107,7 @@ class BaseInitializer:
         self.constant_induced_field_center = constant_induced_field_center
 
         self.create_dataset_kwargs = dict(
-            chunks=True, shuffle=True,
-            compression='gzip', compression_opts=5
+            chunks=True, shuffle=True, compression='lzf'
         )
 
         self.particles = dict()
