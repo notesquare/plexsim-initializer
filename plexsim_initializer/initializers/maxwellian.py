@@ -66,16 +66,13 @@ class MaxwellianInitializer(BaseInitializer):
         n_computational_to_physical = int(
                 grid_config['n_computational_to_physical'])
 
-        temperature = self.load_relative_npy_file(temperature)
-        density = self.load_relative_npy_file(density)
+        temperature = self.load_field_array(temperature, self.grid_vertex_shape)
+        density = self.load_field_array(density, self.grid_vertex_shape)
 
-        if current_density is not None:
-            current_density = self.load_relative_npy_file(current_density)
-        else:
-            current_density = np.zeros((*(self.grid_shape+1), 3))
-
-        assert tuple(self.grid_shape + 1) == temperature.shape \
-            == density.shape == current_density.shape[:-1]
+        if current_density is None:
+            current_density = [0, 0, 0]
+        current_density = self.load_field_array(current_density,
+                                                (*self.grid_vertex_shape, 3))
 
         thermal_velocity = np.sqrt(np.abs(2 * q * temperature) / m)
 
@@ -83,9 +80,9 @@ class MaxwellianInitializer(BaseInitializer):
         density_center = np.empty(self.grid_shape, dtype=density.dtype)
         j_center = np.empty((*self.grid_shape, 3), dtype=current_density.dtype)
 
-        node_to_center_3d(thermal_velocity, vth_center)
-        node_to_center_3d(density, density_center)
-        node_to_center_3d(current_density, j_center)
+        node_to_center_3d(thermal_velocity, vth_center, self.coordinate_system)
+        node_to_center_3d(density, density_center, self.coordinate_system)
+        node_to_center_3d(current_density, j_center, self.coordinate_system)
 
         n_particles_in_cell = density_center * \
             self.cell_size.prod() / n_computational_to_physical
@@ -135,11 +132,10 @@ class MaxwellianInitializer(BaseInitializer):
         n_computational_to_physical = particles['n_computational_to_physical']
 
         if self.save_state:
-            grid_n = np.zeros((self.grid_shape + 1), dtype=np.float64)
-            grid_U = np.zeros((*(self.grid_shape + 1), 3), dtype=np.float64)
-            grid_U2 = np.zeros((self.grid_shape + 1), dtype=np.float64)
+            grid_n = np.zeros(self.grid_vertex_shape, dtype=np.float64)
+            grid_U = np.zeros((*self.grid_vertex_shape, 3), dtype=np.float64)
+            grid_U2 = np.zeros(self.grid_vertex_shape, dtype=np.float64)
 
-        axis_labels = ['x', 'y', 'z']
         with h5py.File(h5_fp, 'a') as h5f:
             kinetic_E = 0
             for cell_index, cell_coords in enumerate(gilbert_curve):
@@ -159,7 +155,7 @@ class MaxwellianInitializer(BaseInitializer):
                         X, U, C_idx, grid_n, grid_U, grid_U2)
                 # serialize
                 X = np.nextafter(X + C_idx, C_idx)
-                for i, axis in enumerate(axis_labels):
+                for i, axis in enumerate(self.axis_labels):
                     # X
                     _path = f'{prefix}/position/{axis}'
                     h5f[_path][start:end+1] = X[:, i]
@@ -177,7 +173,7 @@ class MaxwellianInitializer(BaseInitializer):
                     grid_U2=grid_U2
                 ))
 
-            for i, axis in enumerate(axis_labels):
+            for i, axis in enumerate(self.axis_labels):
                 _path = f'{prefix}/position/{axis}'
                 h5f[_path][end+1:] = None
 

@@ -21,8 +21,8 @@ grids:
   -
     species: electron
     dtype:
-      X: fp32
-      U: fp32
+      X: fp64
+      U: fp64
     n_splits: 2
     n_computational_to_physical: 1.e+10
     initial_condition:
@@ -37,8 +37,8 @@ grids:
   -
     species: ion
     dtype:
-      X: fp32
-      U: fp32
+      X: fp64
+      U: fp64
     n_splits: 2
     n_computational_to_physical: 1.e+10
     initial_condition:

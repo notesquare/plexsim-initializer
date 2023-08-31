@@ -1,0 +1,51 @@
+initializer: maxwellian
+
+environment:
+  coordinate_system: cylindrical
+  grid_shape: [30, 10, 10]
+  cell_size: [0.1, 0.1]
+  scale_length: 1.e-6
+  r0: 1.0
+  external_magnetic_field: [0.2, 0.2, 0.2]
+  external_electric_field: [1.0, 1.0, 1.0]
+  field_dtype: fp64
+  relative_permittivity: 1
+  relative_permeability: 1
+
+grids:
+  -
+    species: electron
+    dtype:
+      X: fp64
+      U: fp64
+    n_splits: 2
+    n_computational_to_physical: 1.e+14
+    initial_condition:
+      temperature: [10]  # [eV]
+      density: [1.e+18]  # [m^-3]
+      current_density: [0, 0, 0]
+
+      tracking:
+        n_particles: 20
+        sample: random
+
+  -
+    species: ion
+    dtype:
+      X: fp64
+      U: fp64
+    n_splits: 2
+    n_computational_to_physical: 1.e+14
+    initial_condition:
+      temperature: [4]  # [eV]
+      density: [1.e+18]  # [m^-3]
+
+      tracking:
+        n_particles: 20
+        sample: random
+
+simulation:
+  backend: local
+  chunk_size: 1.e+6
+  iteration_encoding: file
+  save_state: No

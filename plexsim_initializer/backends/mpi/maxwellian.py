@@ -12,7 +12,7 @@ from ...lib.common import compute_grid_velocity
 
 def distribute_and_serialize(start, end, vth, velocity, cell_coords, h5_fp,
                              _prefix, _v_table, _dtype_X, _dtype_U,
-                             grid_shape, _save_state):
+                             grid_shape, _save_state, _axis_labels):
     global h5f
     global prefix
     global v_table
@@ -22,6 +22,7 @@ def distribute_and_serialize(start, end, vth, velocity, cell_coords, h5_fp,
     global grid_U
     global grid_U2
     global save_state
+    global axis_labels
 
     if h5_fp is not None:
         # init
@@ -30,6 +31,7 @@ def distribute_and_serialize(start, end, vth, velocity, cell_coords, h5_fp,
         dtype_X = _dtype_X
         dtype_U = _dtype_U
         save_state = _save_state
+        axis_labels = _axis_labels
 
         if MPI.Comm.Get_parent() == MPI.COMM_NULL:
             # static mode
@@ -40,9 +42,9 @@ def distribute_and_serialize(start, end, vth, velocity, cell_coords, h5_fp,
         h5f = h5py.File(h5_fp, 'a', driver='mpio', comm=h5_comm)
 
         if save_state:
-            grid_n = np.zeros((grid_shape + 1), dtype=np.float64)
-            grid_U = np.zeros((*(grid_shape + 1), 3), dtype=np.float64)
-            grid_U2 = np.zeros((grid_shape + 1), dtype=np.float64)
+            grid_n = np.zeros(self.grid_vertex_shape, dtype=np.float64)
+            grid_U = np.zeros((*self.grid_vertex_shape, 3), dtype=np.float64)
+            grid_U2 = np.zeros(self.grid_vertex_shape, dtype=np.float64)
 
     is_exist = (start is not None) and (start <= end)
     if is_exist:
@@ -57,7 +59,6 @@ def distribute_and_serialize(start, end, vth, velocity, cell_coords, h5_fp,
     else:
         U2 = 0
 
-    axis_labels = ['x', 'y', 'z']
     for i, axis in enumerate(axis_labels):
         # X
         _path = f'{prefix}/position/{axis}'
@@ -133,7 +134,8 @@ class MaxwellianInitializer(MPIInitializer, _MaxwellianInitializer):
             gen_arg(dtype_X, max_workers),
             gen_arg(dtype_U, max_workers),
             gen_arg(self.grid_shape, max_workers),
-            gen_arg(self.save_state, max_workers)
+            gen_arg(self.save_state, max_workers),
+            gen_arg(self.axis_labels, max_workers)
         )
         if MPI.COMM_WORLD.Get_size() > 1:
             # static mode
@@ -156,9 +158,8 @@ class MaxwellianInitializer(MPIInitializer, _MaxwellianInitializer):
                 grid_U2=grid_U2
             ))
 
-        axis_labels = ['x', 'y', 'z']
         with h5py.File(h5_fp, 'a') as h5f:
-            for i, axis in enumerate(axis_labels):
+            for i, axis in enumerate(self.axis_labels):
                 _path = f'{prefix}/position/{axis}'
                 h5f[_path][particles['n_particles']:] = None
 

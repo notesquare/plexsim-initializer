@@ -87,11 +87,10 @@ class RandomInitializer(BaseInitializer):
         n_computational_to_physical = particles['n_computational_to_physical']
 
         if self.save_state:
-            grid_n = np.zeros((self.grid_shape + 1), dtype=np.float64)
-            grid_U = np.zeros((*(self.grid_shape + 1), 3), dtype=np.float64)
-            grid_U2 = np.zeros((self.grid_shape + 1), dtype=np.float64)
+            grid_n = np.zeros(self.grid_vertex_shape, dtype=np.float64)
+            grid_U = np.zeros((*self.grid_vertex_shape, 3), dtype=np.float64)
+            grid_U2 = np.zeros(self.grid_vertex_shape, dtype=np.float64)
 
-        axis_labels = ['x', 'y', 'z']
         with h5py.File(h5_fp, 'a') as h5f:
             kinetic_E = 0
             for cell_index, cell_coords in enumerate(gilbert_curve):
@@ -109,7 +108,7 @@ class RandomInitializer(BaseInitializer):
                         X, U, C_idx, grid_n, grid_U, grid_U2)
                 # serialize
                 X = np.nextafter(X + C_idx, C_idx)
-                for i, axis in enumerate(axis_labels):
+                for i, axis in enumerate(self.axis_labels):
                     # X
                     _path = f'{prefix}/position/{axis}'
                     h5f[_path][start:end+1] = X[:, i]
@@ -127,7 +126,7 @@ class RandomInitializer(BaseInitializer):
                     grid_U2=grid_U2
                 ))
 
-            for i, axis in enumerate(axis_labels):
+            for i, axis in enumerate(self.axis_labels):
                 _path = f'{prefix}/position/{axis}'
                 h5f[_path][end+1:] = None
 

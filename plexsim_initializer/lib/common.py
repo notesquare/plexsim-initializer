@@ -17,9 +17,18 @@ class SavedFlag(Flag):
         return np.uint8(super().value)
 
 
-@njit
-def node_to_center_3d(V, V_center):
+def node_to_center_3d(V, V_center, coordinate_system):
     assert len(V.shape) == len(V_center.shape)
+    if coordinate_system == 'cartesian':
+        node_to_center_cartesian(V, V_center)
+    elif coordinate_system == 'cylindrical':
+        node_to_center_cylindrical(V, V_center)
+    else:
+        raise NotImplementedError()
+
+
+@njit
+def node_to_center_cartesian(V, V_center):
     for i in range(3):
         assert V.shape[i] == V_center.shape[i] + 1
 
@@ -29,6 +38,25 @@ def node_to_center_3d(V, V_center):
                 V_center[i, j, k] = V[i, j, k] + V[i+1, j, k] + V[i, j+1, k]\
                     + V[i, j, k+1] + V[i+1, j+1, k] + V[i+1, j, k+1]\
                     + V[i, j+1, k+1] + V[i+1, j+1, k+1]
+    V_center *= .125
+
+
+@njit
+def node_to_center_cylindrical(V, V_center):
+    for i in range(2):
+        assert V.shape[i] == V_center.shape[i] + 1
+    assert V.shape[2] == V_center.shape[2]
+
+    for i in range(V_center.shape[0]):
+        for j in range(V_center.shape[1]):
+            for k in range(V_center.shape[2] - 1):
+                V_center[i, j, k] = V[i, j, k] + V[i+1, j, k] + V[i, j+1, k]\
+                    + V[i, j, k+1] + V[i+1, j+1, k] + V[i+1, j, k+1]\
+                    + V[i, j+1, k+1] + V[i+1, j+1, k+1]
+            k = V_center.shape[2] - 1
+            V_center[i, j, k] = V[i, j, k] + V[i+1, j, k]\
+                + V[i, j+1, k] + V[i, j, 0] + V[i+1, j+1, k]\
+                + V[i+1, j, 0] + V[i, j+1, 0] + V[i+1, j+1, 0]
     V_center *= .125
 
 
@@ -59,6 +87,9 @@ def add_density_velocity(cell_index, U, grid_n, grid_U, grid_U2, weight):
                 _i = cell_index[0] + i
                 _j = cell_index[1] + j
                 _k = cell_index[2] + k
+                # TODO
+                # if _k == grid_shape[2] and cylindrical:
+                #     _k = 0
 
                 grid_n[_i, _j, _k] += weight[i][j][k]
                 grid_U[_i, _j, _k] += U * weight[i][j][k]
@@ -72,6 +103,7 @@ def compute_grid_velocity(X, U, C_idx, grid_n, grid_U, grid_U2):
         if np.any(cell_index == -1):
             continue
 
+        # TODO: cylindrical coordinates
         weight = weight_function(X[i])
 
         add_density_velocity(

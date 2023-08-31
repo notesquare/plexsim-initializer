@@ -24,6 +24,8 @@ class BaseInitializer:
             _environment_config.pop('relative_permeability', 1)
         self.permittivity = 8.854e-12 * \
             _environment_config.pop('relative_permittivity', 1)
+        self.coordinate_system = \
+            _environment_config.pop('coordinate_system', 'cartesian')
 
         self.environment_config = _environment_config
 
@@ -201,6 +203,10 @@ class BaseInitializer:
             else:
                 h5_group.attrs[k] = v
 
+    @property
+    def env_attrs(self):
+        raise NotImplementedError()
+
     def setup_root_attr(self, h5f, iteration_encoding, iteration_format,
                         author='nobody'):
         current_dt = datetime.now().astimezone()
@@ -215,20 +221,14 @@ class BaseInitializer:
             openPMD=np.string_('1.1.0'),
             openPMDextension=np.uint32(1),
             software=np.string_('PLEXsim Initializer'),
-            softwareVersion=np.string_('1')
+            softwareVersion=np.string_('1'),
+            _geometry=np.string_(self.coordinate_system)
         )
 
         self.write_settings(h5f, root_attrs)
 
-        env_attrs = dict(
-            grid_shape=self.grid_shape,
-            cell_size=self.cell_size,
-            permittivity=self.permittivity,
-            permeability=self.permeability
-        )
-
         settings = h5f.require_group('settings')
-        self.write_settings(settings, env_attrs)
+        self.write_settings(settings, self.env_attrs)
         settings.create_dataset('gilbert_curve',
                                 data=np.array(self.gilbert_curve),
                                 dtype=np.int16)
@@ -277,42 +277,33 @@ class BaseInitializer:
 
         self.write_settings(base, base_attrs)
 
-    def load_field_node(self, field, field_dtype):
-        grid_vertex_shape = (*(self.grid_shape + 1), 3)
+    @property
+    def grid_vertex_shape(self):
+        raise NotImplementedError()
 
+    @property
+    def B_shape(self):
+        raise NotImplementedError()
+
+    @property
+    def E_shape(self):
+        raise NotImplementedError()
+
+    def load_field_array(self, field, shape, dtype=np.float64):
         if isinstance(field, list):
-            return np.full(grid_vertex_shape, field,
-                           dtype=field_dtype)
+            return np.full(shape, field, dtype=dtype)
         elif isinstance(field, str):
             if field.endswith('.npy'):
-                F = self.load_relative_npy_file(field) \
-                    .astype(field_dtype)
-                assert np.all(F.shape == grid_vertex_shape)
-                return F
-            else:
-                raise NotImplementedError()
-        elif isinstance(field, np.ndarray):
-            return field.astype(field_dtype)
-        else:
-            raise NotImplementedError()
-
-    def load_field_center(self, field, field_dtype):
-        shape = (*(self.grid_shape), 3)
-
-        if isinstance(field, list):
-            return np.full(shape, field, dtype=field_dtype)
-        elif isinstance(field, str):
-            if field.endswith('.npy'):
-                F = self.load_relative_npy_file(field) \
-                    .astype(field_dtype)
+                F = self.load_relative_npy_file(field).astype(dtype)
                 assert np.all(F.shape == shape)
                 return F
             else:
                 raise NotImplementedError()
         elif isinstance(field, np.ndarray):
-            return field.astype(field_dtype)
+            assert np.all(field.shape == shape)
+            return field.astype(dtype)
         else:
-            raise NotImplementedError()
+            NotImplementedError()
 
     def setup_fields(self, h5f, iteration=0):
         fields_path = self.base_path(h5f, iteration) \
@@ -339,30 +330,33 @@ class BaseInitializer:
         else:
             raise NotImplementedError()
 
-        self.B_external = self.load_field_center(
+        self.B_external = self.load_field_array(
             self.environment_config.get('external_magnetic_field'),
-            field_dtype)
+            self.B_shape, field_dtype
+        )
         if self.constant_external_field_center is not None:
             self.B_external[tuple(
                 axis for axis in self.constant_external_field_center.T)] = 0
 
-        self.B_induced = self.load_field_center(
+        self.B_induced = self.load_field_array(
             self.environment_config.get('induced_magnetic_field', [0, 0, 0]),
-            field_dtype)
+            self.B_shape, field_dtype
+        )
         if self.constant_induced_field_center is not None:
             self.B_induced[tuple(
                 axis for axis in self.constant_induced_field_center.T)] = 0
 
-        self.E_external = self.load_field_node(
+        self.E_external = self.load_field_array(
             self.environment_config.get('external_electric_field'),
-            field_dtype)
+            self.E_shape, field_dtype
+        )
         if self.constant_external_field_node is not None:
             self.E_external[tuple(
                 axis for axis in self.constant_external_field_node.T)] = 0
 
-        self.E_induced = self.load_field_node(
+        self.E_induced = self.load_field_array(
             self.environment_config.get('induced_electric_field', [0, 0, 0]),
-            field_dtype)
+            self.E_shape, field_dtype)
         if self.constant_induced_field_node is not None:
             self.E_induced[tuple(
                 axis for axis in self.constant_induced_field_node.T)] = 0
@@ -372,33 +366,30 @@ class BaseInitializer:
 
         return SavedFlag.fields
 
+    @property
+    def axis_labels(self):
+        raise NotImplementedError()
+
+    @property
+    def B_attrs(self):
+        raise NotImplementedError()
+
+    @property
+    def E_attrs(self):
+        raise NotImplementedError()
+
     def write_B(self, fields_group):
         B_group = fields_group.require_group(np.string_('B'))
         B_induced_group = fields_group.require_group(np.string_('B_induced'))
 
-        dimension = len(self.grid_shape)
-        if dimension == 3:
-            axis_labels = [np.string_(v) for v in ['x', 'y', 'z']]
-        else:
-            raise NotImplementedError()
-
-        B_attrs = dict(
-            geometry=np.string_('cartesian'),
-            gridSpacing=self.cell_size,
-            gridGlobalOffset=np.zeros(dimension, dtype=np.float64) + 0.5,
-            gridUnitSI=np.float64(1),
-            dataOrder=np.string_('C'),
-            axisLabels=np.array(axis_labels),
-            unitDimension=np.array(
-                [0, 1, -2, -1, 0, 0, 0], dtype=np.float64),
-            fieldSmoothing=np.string_('none'),
-            timeOffset=0.
-        )
+        B_attrs = self.B_attrs
 
         self.write_settings(B_group, B_attrs)
         self.write_settings(B_induced_group, B_attrs)
 
         B = self.B_external + self.B_induced
+        axis_labels = [np.string_(v) for v in self.axis_labels]
+        dimension = len(self.grid_shape)
         for i, axis in enumerate(axis_labels):
             B_group.create_dataset(axis, data=B[..., i],
                                    **self.create_dataset_kwargs)
@@ -416,29 +407,13 @@ class BaseInitializer:
         E_group = fields_group.require_group(np.string_('E'))
         E_induced_group = fields_group.require_group(np.string_('E_induced'))
 
-        dimension = len(self.grid_shape)
-        if dimension == 3:
-            axis_labels = [np.string_(v) for v in ['x', 'y', 'z']]
-        else:
-            raise NotImplementedError()
-
-        E_attrs = dict(
-            geometry=np.string_('cartesian'),
-            gridSpacing=self.cell_size,
-            gridGlobalOffset=np.zeros(dimension, dtype=np.float64),
-            gridUnitSI=np.float64(1),
-            dataOrder=np.string_('C'),
-            axisLabels=np.array(axis_labels),
-            unitDimension=np.array(
-                [1, 1, -3, -1, 0, 0, 0], dtype=np.float64),
-            fieldSmoothing=np.string_('none'),
-            timeOffset=0.
-        )
-
+        E_attrs = self.E_attrs
         self.write_settings(E_group, E_attrs)
         self.write_settings(E_induced_group, E_attrs)
 
         E = self.E_external + self.E_induced
+        axis_labels = [np.string_(v) for v in self.axis_labels]
+        dimension = len(self.grid_shape)
         for i, axis in enumerate(axis_labels):
             E_group.create_dataset(axis, data=E[..., i],
                                    **self.create_dataset_kwargs)
@@ -492,7 +467,10 @@ class BaseInitializer:
 
         return np.array(start_indices), np.array(end_indices)
 
-    def get_particle_attrs(self, n_particles, q, m, axis_labels):
+    def position_offset_attrs(self, n_particles):
+        raise NotImplementedError()
+
+    def get_particle_attrs(self, n_particles, q, m):
         charge_attrs = dict(
             value=q,
             shape=np.array([n_particles], dtype=np.uint64),
@@ -517,17 +495,6 @@ class BaseInitializer:
             timeOffset=0.,
             unitDimension=np.array([1, 0, 0, 0, 0, 0, 0], dtype=np.float64)
         )
-        offset_attrs = dict(
-            macroWeighted=np.uint32(1),
-            weightingPower=0.,
-            timeOffset=0.,
-            unitDimension=np.array([1, 0, 0, 0, 0, 0, 0], dtype=np.float64),
-            **{axis: dict(
-                value=np.float32(0),
-                shape=np.array([n_particles], dtype=np.uint64),
-                unitSI=np.float64(1)
-            ) for axis in axis_labels}
-        )
         momentum_attrs = dict(
             macroWeighted=np.uint32(1),
             weightingPower=0.,
@@ -539,7 +506,7 @@ class BaseInitializer:
             charge=charge_attrs,
             mass=mass_attrs,
             position=position_attrs,
-            positionOffset=offset_attrs,
+            positionOffset=self.position_offset_attrs(n_particles),
             momentum=momentum_attrs
         )
 
@@ -645,20 +612,16 @@ class BaseInitializer:
 
         return flag
 
+    def write_particle_patches_offset(self, patches, n_splits):
+        raise NotImplementedError()
+
     def write_particle_attrs(self, h5_group, particle_data, n_splits,
                              n_computational_to_physical, dtype_X, dtype_U):
         n_particles = particle_data['n_particles']
         q = particle_data['q']
         m = particle_data['m']
 
-        dimension = len(self.grid_shape)
-        if dimension == 3:
-            axis_labels = ['x', 'y', 'z']
-        else:
-            raise NotImplementedError()
-
-        particles_attrs = self.get_particle_attrs(n_particles, q, m,
-                                                  axis_labels)
+        particles_attrs = self.get_particle_attrs(n_particles, q, m)
 
         gilbert_n_particles = particle_data['gilbert_n_particles']
         start_indices, end_indices = \
@@ -693,18 +656,12 @@ class BaseInitializer:
                                dtype=np.uint64)
         patches['numParticlesOffset'].attrs['unitSI'] = np.float64(1)
 
-        patches.require_group('offset')
-        patches['offset'].attrs['unitDimension'] = np.array(
-            [1, 0, 0, 0, 0, 0, 0], dtype=np.float64)
-        for i, axis in enumerate(axis_labels):
-            patches['offset'].create_dataset(axis, data=np.full(n_splits, 0.))
-            patches[f'offset/{axis}'].attrs['unitSI'] = \
-                np.float64(self.cell_size[i])
+        self.write_particle_patches_offset(patches, n_splits)
 
         patches.require_group('extent')
         patches['extent'].attrs['unitDimension'] = np.array(
             [1, 0, 0, 0, 0, 0, 0], dtype=np.float64)
-        for i, axis in enumerate(axis_labels):
+        for i, axis in enumerate(self.axis_labels):
             patches['extent'].create_dataset(
                 axis, data=np.full(n_splits, self.grid_shape[i]))
             patches[f'extent/{axis}'].attrs['unitSI'] = \
@@ -733,7 +690,7 @@ class BaseInitializer:
         if avg_n_particles > self.chunk_size * 2:
             _create_dataset_kwargs = self.create_dataset_kwargs.copy()
             _create_dataset_kwargs['chunks'] = (self.chunk_size,)
-        for axis in axis_labels:
+        for axis in self.axis_labels:
             # X
             _path = f'position/{axis}'
             h5_group.create_dataset(_path, (n_particles + 1, ),
@@ -755,9 +712,7 @@ class BaseInitializer:
         tracked_group.attrs['_gridIndex'] = grid_index
         tracked_group.attrs['_tracked'] = 1
 
-        axis_labels = ['x', 'y', 'z']
-        tracked_attrs = self.get_particle_attrs(
-            n_track_particles, q, m, axis_labels)
+        tracked_attrs = self.get_particle_attrs(n_track_particles, q, m)
         tracked_attrs.update(dict(
             particleShape=3.0,
             currentDeposition=np.string_('none'),
@@ -804,13 +759,7 @@ class BaseInitializer:
         )
         self.write_settings(tracked_group['id'], id_attr)
 
-        dimension = len(self.grid_shape)
-        if dimension == 3:
-            axis_labels = ['x', 'y', 'z']
-        else:
-            raise NotImplementedError()
-
-        for i, axis in enumerate(axis_labels):
+        for i, axis in enumerate(self.axis_labels):
             # X
             _path = f'position/{axis}'
             X = particle_group[_path]
@@ -829,25 +778,20 @@ class BaseInitializer:
 
     @property
     def magnetic_E(self):
-        B_total = self.B_external + self.B_induced
-        magnetic_E = 0.5 * self.cell_size.prod() / \
-            self.permeability * (B_total * B_total).sum()
-
-        induced_magnetic_E = 0.5 * self.cell_size.prod() / \
-            self.permeability * (self.B_induced * self.B_induced).sum()
-
-        return magnetic_E, induced_magnetic_E
+        raise NotImplementedError()
 
     @property
     def electric_E(self):
         grid_center_shape = np.array((*(self.grid_shape), 3))
         E_center = np.empty(grid_center_shape)
 
-        node_to_center_3d(self.E_external + self.E_induced, E_center)
+        node_to_center_3d(self.E_external + self.E_induced,
+                          E_center, self.coordinate_system)
         electric_E = 0.5 * self.cell_size.prod() * \
             self.permittivity * (E_center * E_center).sum()
 
-        node_to_center_3d(self.E_induced, E_center)
+        node_to_center_3d(self.E_induced, E_center,
+                          self.coordinate_system)
         induced_electric_E = 0.5 * self.cell_size.prod() * \
             self.permittivity * (E_center * E_center).sum()
 
@@ -881,15 +825,20 @@ class BaseInitializer:
 
         return SavedFlag.stats
 
-    def write_state(self, fields_group, particle_name, axis_labels,
-                    grid_n, grid_U, grid_T):
+    @property
+    def grid_global_offset(self):
+        raise NotImplementedError()
+
+    def write_state(self, fields_group, particle_name, grid_n,
+                    grid_U, grid_T):
+        axis_labels = np.array([np.string_(v) for v in self.axis_labels])
         n_attrs = dict(
-            geometry=np.string_('cartesian'),
+            geometry=np.string_(self.coordinate_system),
             gridSpacing=self.cell_size,
-            gridGlobalOffset=np.zeros(3, dtype=np.float64),
+            gridGlobalOffset=self.grid_global_offset,
             gridUnitSI=np.float64(1),
             dataOrder=np.string_('C'),
-            axisLabels=np.array(axis_labels),
+            axisLabels=axis_labels,
             unitDimension=np.array(
                 [-3, 0, 0, 0, 0, 0, 0], dtype=np.float64),
             fieldSmoothing=np.string_('none'),
@@ -902,12 +851,12 @@ class BaseInitializer:
         self.write_settings(fields_group[f'{particle_name}_n'], n_attrs)
 
         T_attrs = dict(
-            geometry=np.string_('cartesian'),
+            geometry=np.string_(self.coordinate_system),
             gridSpacing=self.cell_size,
-            gridGlobalOffset=np.zeros(3, dtype=np.float64),
+            gridGlobalOffset=self.grid_global_offset,
             gridUnitSI=np.float64(1),
             dataOrder=np.string_('C'),
-            axisLabels=np.array(axis_labels),
+            axisLabels=axis_labels,
             unitDimension=np.array(
                 [2, 1, -3, -1, 0, 0, 0], dtype=np.float64),
             fieldSmoothing=np.string_('none'),
@@ -920,12 +869,12 @@ class BaseInitializer:
         self.write_settings(fields_group[f'{particle_name}_T'], T_attrs)
 
         U_attrs = dict(
-            geometry=np.string_('cartesian'),
+            geometry=np.string_(self.coordinate_system),
             gridSpacing=self.cell_size,
-            gridGlobalOffset=np.zeros(3, dtype=np.float64),
+            gridGlobalOffset=self.grid_global_offset,
             gridUnitSI=np.float64(1),
             dataOrder=np.string_('C'),
-            axisLabels=np.array(axis_labels),
+            axisLabels=axis_labels,
             unitDimension=np.array(
                 [1, 0, -1, 0, 0, 0, 0], dtype=np.float64),
             fieldSmoothing=np.string_('none'),
@@ -945,7 +894,6 @@ class BaseInitializer:
             + np.string_(h5f.attrs['meshesPath'])
         fields_group = h5f.require_group(fields_path)
 
-        axis_labels = [np.string_(v) for v in ['x', 'y', 'z']]
         for grid_index, grid_values in self.particles.items():
             q = grid_values['q']
             m = grid_values['m']
@@ -966,6 +914,7 @@ class BaseInitializer:
 
             grid_T = grid_U2 * m / (3 * abs(q))
 
+            # TODO: cell volume (cylindrical)
             grid_n = grid_n * n_computational_to_physical\
                 / self.cell_size.prod()
 
@@ -978,6 +927,6 @@ class BaseInitializer:
                              self.constant_external_field_node.T)] = 0
 
             particle_name = grid_values['particle_name']
-            self.write_state(fields_group, particle_name, axis_labels,
-                             grid_n, grid_U, grid_T)
+            self.write_state(fields_group, particle_name, grid_n,
+                             grid_U, grid_T)
         return SavedFlag.state
