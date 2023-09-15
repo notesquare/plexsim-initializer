@@ -36,7 +36,7 @@ def get_v_table(nvts=3.3):
 
 
 def _distribute_maxwellian(start, end, vth, velocity, cell_coords,
-                           v_table, dtype_X, dtype_U):
+                           v_table, dtype_X, dtype_U, c=3e8):
     n_particles = end - start + 1
 
     X = np.random.random((n_particles, 3))
@@ -46,17 +46,18 @@ def _distribute_maxwellian(start, end, vth, velocity, cell_coords,
 
     n_velocity_dist = v_table.shape[0]
     indices = np.random.choice(n_velocity_dist, n_particles)
-    U[:] = vth * v_table[indices] + velocity
+    U[:] = (vth * v_table[indices] + velocity) / 3e8
     C_idx = np.full((n_particles, 3), cell_coords)
 
+    # TODO
     U2 = (U * U).sum().item()
     return X, U, C_idx, U2
 
 
 class MaxwellianInitializer(BaseInitializer):
     def load_particles_pre(self, particles, grid_config):
-        q = particles['q']
-        m = particles['m']
+        q = particles['q'] * (-1.602e-19)
+        m = particles['m'] * 9.11e-31
 
         initial_condition = grid_config.get('initial_condition', {})
         temperature = initial_condition['temperature']
@@ -128,7 +129,7 @@ class MaxwellianInitializer(BaseInitializer):
                               dtype_X, dtype_U):
         vth_list = particles['gilbert_vth']
         velocity_list = particles['gilbert_drifted_velocity']
-        m = particles['m']
+        m = particles['m'] * 9.11e-31
         n_computational_to_physical = particles['n_computational_to_physical']
 
         if self.save_state:

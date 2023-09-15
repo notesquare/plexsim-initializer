@@ -31,12 +31,12 @@ class CylindricalInitializer(BaseInitializer):
     @property
     def B_shape(self):
         nz, nr, nphi = self.grid_shape
-        return nz + 1, nr + 1, nphi, 3
+        return nz, nr, nphi, 3
     
     @property
     def E_shape(self):
         nz, nr, nphi = self.grid_shape
-        return nz + 1, nr + 1, nphi, 3
+        return nz, nr, nphi, 3
 
     @property
     def axis_labels(self):
@@ -107,6 +107,8 @@ class CylindricalInitializer(BaseInitializer):
 
     @property
     def magnetic_E(self):
+        # TODO
+        return 0, 0
         grid_center_shape = np.array((*(self.grid_shape), 3))
         B_center = np.empty(grid_center_shape)
 

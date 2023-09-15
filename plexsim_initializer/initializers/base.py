@@ -530,11 +530,11 @@ class BaseInitializer:
             )
 
             if species == 'electron':
-                q = grid_config.get('q', -1.602e-19)
-                m = grid_config.get('m', 9.11e-31)
+                q = grid_config.get('q', 1)
+                m = grid_config.get('m', 1)
             elif species == 'ion':
-                q = grid_config.get('q', 1.602e-19)
-                m = grid_config.get('m', 1.67e-27)
+                q = grid_config.get('q', -1)
+                m = grid_config.get('m', 1.67e-27 / 9.11e-31)
             else:
                 q = grid_config['q']
                 m = grid_config['m']
@@ -782,6 +782,8 @@ class BaseInitializer:
 
     @property
     def electric_E(self):
+        # TODO
+        return 0, 0
         grid_center_shape = np.array((*(self.grid_shape), 3))
         E_center = np.empty(grid_center_shape)
 
@@ -895,8 +897,8 @@ class BaseInitializer:
         fields_group = h5f.require_group(fields_path)
 
         for grid_index, grid_values in self.particles.items():
-            q = grid_values['q']
-            m = grid_values['m']
+            q = grid_values['q'] * (-1.602e-19)
+            m = grid_values['m'] * 9.11e-31
             n_computational_to_physical = \
                 grid_values['n_computational_to_physical']
             grid_n = grid_values['grid_n']

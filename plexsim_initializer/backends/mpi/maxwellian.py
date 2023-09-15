@@ -105,7 +105,7 @@ class MaxwellianInitializer(MPIInitializer, _MaxwellianInitializer):
                               dtype_X, dtype_U):
         vth_list = particles['gilbert_vth']
         velocity_list = particles['gilbert_drifted_velocity']
-        m = particles['m']
+        m = particles['m'] * 9.11e-31
         n_computational_to_physical = particles['n_computational_to_physical']
 
         if self.save_state:
