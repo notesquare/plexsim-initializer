@@ -45,7 +45,6 @@ def node_to_center_cartesian(V, V_center):
 def node_to_center_cylindrical(V, V_center):
     for i in range(2):
         assert V.shape[i] == V_center.shape[i] + 1
-    assert V.shape[2] == V_center.shape[2]
 
     for i in range(V_center.shape[0]):
         for j in range(V_center.shape[1]):
