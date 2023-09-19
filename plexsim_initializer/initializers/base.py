@@ -782,22 +782,7 @@ class BaseInitializer:
 
     @property
     def electric_E(self):
-        # TODO
-        return 0, 0
-        grid_center_shape = np.array((*(self.grid_shape), 3))
-        E_center = np.empty(grid_center_shape)
-
-        node_to_center_3d(self.E_external + self.E_induced,
-                          E_center, self.coordinate_system)
-        electric_E = 0.5 * self.cell_size.prod() * \
-            self.permittivity * (E_center * E_center).sum()
-
-        node_to_center_3d(self.E_induced, E_center,
-                          self.coordinate_system)
-        induced_electric_E = 0.5 * self.cell_size.prod() * \
-            self.permittivity * (E_center * E_center).sum()
-
-        return electric_E, induced_electric_E
+        raise NotImplementedError()
 
     def setup_stats(self, h5f, iteration=0):
         magnetic_E, induced_magnetic_E = self.magnetic_E
@@ -918,7 +903,7 @@ class BaseInitializer:
 
             # TODO: cell volume (cylindrical)
             grid_n = grid_n * n_computational_to_physical\
-                / self.cell_size.prod()
+                / self.cell_volume
 
             if self.constant_external_field_node is not None:
                 grid_n[tuple(axis for axis in

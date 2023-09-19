@@ -49,8 +49,7 @@ def _distribute_maxwellian(start, end, vth, velocity, cell_coords,
     U[:] = (vth * v_table[indices] + velocity) / 3e8
     C_idx = np.full((n_particles, 3), cell_coords)
 
-    # TODO
-    U2 = (U * U).sum().item()
+    U2 = (U * U).sum().item() * (c ** 2)
     return X, U, C_idx, U2
 
 
@@ -86,7 +85,7 @@ class MaxwellianInitializer(BaseInitializer):
         node_to_center_3d(current_density, j_center, self.coordinate_system)
 
         n_particles_in_cell = density_center * \
-            self.cell_size.prod() / n_computational_to_physical
+            self.cell_volume / n_computational_to_physical
         assert np.all(n_particles_in_cell < np.iinfo(np.int64).max)
         n_particles_in_cell = np.around(n_particles_in_cell).astype(int)
 

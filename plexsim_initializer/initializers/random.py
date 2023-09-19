@@ -23,8 +23,8 @@ def distribute_random_normal_vector_length(V, l, s):  # noqa
             V[i, j] *= _factor
 
 
-def _distribute_random(start, end, avg_velocity,
-                       cell_coords, dtype_X, dtype_U):
+def _distribute_random(start, end, avg_velocity, cell_coords,
+                       dtype_X, dtype_U, c=3e8):
     n_particles = end - start + 1
 
     X = np.random.random((n_particles, 3))
@@ -37,7 +37,7 @@ def _distribute_random(start, end, avg_velocity,
 
     C_idx = np.full((n_particles, 3), cell_coords)
 
-    U2 = (U * U).sum().item()
+    U2 = (U * U).sum().item() * (c ** 2)
     return X, U, C_idx, U2
 
 

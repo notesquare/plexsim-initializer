@@ -29,6 +29,10 @@ class CartesianInitializer(BaseInitializer):
         return (*(self.grid_shape + 1), 3)
 
     @property
+    def cell_volume(self):
+        return self.cell_size.prod()
+
+    @property
     def axis_labels(self):
         dimension = len(self.grid_shape)
         if dimension == 3:
@@ -95,10 +99,27 @@ class CartesianInitializer(BaseInitializer):
     @property
     def magnetic_E(self):
         B_total = self.B_external + self.B_induced
-        magnetic_E = 0.5 * self.cell_size.prod() / \
+        magnetic_E = 0.5 * self.cell_volume / \
             self.permeability * (B_total * B_total).sum()
 
-        induced_magnetic_E = 0.5 * self.cell_size.prod() / \
+        induced_magnetic_E = 0.5 * self.cell_volume / \
             self.permeability * (self.B_induced * self.B_induced).sum()
 
         return magnetic_E, induced_magnetic_E
+
+    @property
+    def electric_E(self):
+        grid_center_shape = np.array((*(self.grid_shape), 3))
+        E_center = np.empty(grid_center_shape)
+
+        node_to_center_3d(self.E_external + self.E_induced,
+                          E_center, self.coordinate_system)
+        electric_E = 0.5 * self.cell_volume * \
+            self.permittivity * (E_center * E_center).sum()
+
+        node_to_center_3d(self.E_induced, E_center,
+                          self.coordinate_system)
+        induced_electric_E = 0.5 * self.cell_volume * \
+            self.permittivity * (E_center * E_center).sum()
+
+        return electric_E, induced_electric_E
