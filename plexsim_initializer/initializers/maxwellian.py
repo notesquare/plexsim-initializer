@@ -79,13 +79,14 @@ class MaxwellianInitializer(BaseInitializer):
         vth_center = np.empty(self.grid_shape, dtype=thermal_velocity.dtype)
         density_center = np.empty(self.grid_shape, dtype=density.dtype)
         j_center = np.empty((*self.grid_shape, 3), dtype=current_density.dtype)
+        n_particles_in_cell = np.empty(self.grid_shape, dtype=density.dtype)
 
         node_to_center_3d(thermal_velocity, vth_center, self.coordinate_system)
         node_to_center_3d(density, density_center, self.coordinate_system)
         node_to_center_3d(current_density, j_center, self.coordinate_system)
+        node_to_center_3d(density * self.cell_volume / n_computational_to_physical,
+                          n_particles_in_cell, self.coordinate_system)
 
-        n_particles_in_cell = density_center * \
-            self.cell_volume / n_computational_to_physical
         assert np.all(n_particles_in_cell < np.iinfo(np.int64).max)
         n_particles_in_cell = np.around(n_particles_in_cell).astype(int)
 
