@@ -36,7 +36,7 @@ def get_v_table(nvts=3.3):
 
 
 def _distribute_maxwellian(start, end, vth, velocity, cell_coords,
-                           v_table, dtype_X, dtype_U, c=3e8):
+                           v_table, dtype_X, dtype_U, c=2.99792458e8):
     n_particles = end - start + 1
 
     X = np.random.random((n_particles, 3))
@@ -46,7 +46,7 @@ def _distribute_maxwellian(start, end, vth, velocity, cell_coords,
 
     n_velocity_dist = v_table.shape[0]
     indices = np.random.choice(n_velocity_dist, n_particles)
-    U[:] = (vth * v_table[indices] + velocity) / 3e8
+    U[:] = (vth * v_table[indices] + velocity) / c
     C_idx = np.full((n_particles, 3), cell_coords)
 
     U2 = (U * U).sum().item() * (c ** 2)
@@ -54,9 +54,10 @@ def _distribute_maxwellian(start, end, vth, velocity, cell_coords,
 
 
 class MaxwellianInitializer(BaseInitializer):
-    def load_particles_pre(self, particles, grid_config):
-        q = particles['q'] * (-1.602e-19)
-        m = particles['m'] * 9.11e-31
+    def load_particles_pre(self, particles, grid_config,
+                           _e=1.602e-19, _m=9.1093837e-31):
+        q = particles['q'] * _e
+        m = particles['m'] * _m
 
         initial_condition = grid_config.get('initial_condition', {})
         temperature = initial_condition['temperature']
@@ -84,7 +85,9 @@ class MaxwellianInitializer(BaseInitializer):
         node_to_center_3d(thermal_velocity, vth_center, self.coordinate_system)
         node_to_center_3d(density, density_center, self.coordinate_system)
         node_to_center_3d(current_density, j_center, self.coordinate_system)
-        node_to_center_3d(density * self.cell_volume / n_computational_to_physical,
+
+        cell_volume = self.cell_volume / np.power(2*np.pi, 3)
+        node_to_center_3d(density * cell_volume / n_computational_to_physical,
                           n_particles_in_cell, self.coordinate_system)
 
         assert np.all(n_particles_in_cell < np.iinfo(np.int64).max)
@@ -126,10 +129,10 @@ class MaxwellianInitializer(BaseInitializer):
 
     def distribute_maxwellian(self, h5_fp, prefix, start_indices, end_indices,
                               gilbert_curve, v_table, particles,
-                              dtype_X, dtype_U):
+                              dtype_X, dtype_U, _m=9.1093837e-31):
         vth_list = particles['gilbert_vth']
         velocity_list = particles['gilbert_drifted_velocity']
-        m = particles['m'] * 9.11e-31
+        m = particles['m'] * _m
         n_computational_to_physical = particles['n_computational_to_physical']
 
         if self.save_state:

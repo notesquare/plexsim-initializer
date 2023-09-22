@@ -530,11 +530,11 @@ class BaseInitializer:
             )
 
             if species == 'electron':
-                q = grid_config.get('q', 1)
+                q = grid_config.get('q', -1)
                 m = grid_config.get('m', 1)
             elif species == 'ion':
-                q = grid_config.get('q', -1)
-                m = grid_config.get('m', 1.67e-27 / 9.11e-31)
+                q = grid_config.get('q', 1)
+                m = grid_config.get('m', 1833.15)
             else:
                 q = grid_config['q']
                 m = grid_config['m']
@@ -876,14 +876,16 @@ class BaseInitializer:
                                                        dtype=np.float64)
             U_group[axis].attrs['unitSI'] = np.float64(1)
 
-    def setup_state(self, h5f, iteration=0, density_threshold=1e-10):
+    def setup_state(self, h5f, iteration=0, density_threshold=1e-10,
+                    _e=1.602e-19, _m=9.1093837e-31):
+        raise NotImplementedError('Computing state is not implemented yet.')
         fields_path = self.base_path(h5f, iteration) \
             + np.string_(h5f.attrs['meshesPath'])
         fields_group = h5f.require_group(fields_path)
 
         for grid_index, grid_values in self.particles.items():
-            q = grid_values['q'] * (-1.602e-19)
-            m = grid_values['m'] * 9.11e-31
+            q = grid_values['q'] * _e
+            m = grid_values['m'] * _m
             n_computational_to_physical = \
                 grid_values['n_computational_to_physical']
             grid_n = grid_values['grid_n']
@@ -901,7 +903,6 @@ class BaseInitializer:
 
             grid_T = grid_U2 * m / (3 * abs(q))
 
-            # TODO: cell volume (cylindrical)
             grid_n = grid_n * n_computational_to_physical\
                 / self.cell_volume
 

@@ -101,9 +101,9 @@ class RandomInitializer(MPIInitializer, _RandomInitializer):
         super().__init__(*args, **kwargs)
 
     def distribute_random(self, h5_fp, prefix, start_indices, end_indices,
-                          gilbert_curve, particles, dtype_X, dtype_U):
+                          gilbert_curve, particles, dtype_X, dtype_U, _m=9.1093837e-31):
         avg_velocity = particles['avg_velocity']
-        m = particles['m'] * 9.11e-31
+        m = particles['m'] * _m
         n_computational_to_physical = particles['n_computational_to_physical']
 
         if self.save_state:

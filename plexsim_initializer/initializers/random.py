@@ -24,7 +24,7 @@ def distribute_random_normal_vector_length(V, l, s):  # noqa
 
 
 def _distribute_random(start, end, avg_velocity, cell_coords,
-                       dtype_X, dtype_U, c=3e8):
+                       dtype_X, dtype_U, c=2.99792458e8):
     n_particles = end - start + 1
 
     X = np.random.random((n_particles, 3))
@@ -81,9 +81,9 @@ class RandomInitializer(BaseInitializer):
         )
 
     def distribute_random(self, h5_fp, prefix, start_indices, end_indices,
-                          gilbert_curve, particles, dtype_X, dtype_U):
+                          gilbert_curve, particles, dtype_X, dtype_U, _m=9.1093837e-31):
         avg_velocity = particles['avg_velocity']
-        m = particles['m'] * 9.11e-31
+        m = particles['m'] * _m
         n_computational_to_physical = particles['n_computational_to_physical']
 
         if self.save_state:
