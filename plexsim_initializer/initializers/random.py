@@ -53,7 +53,11 @@ class RandomInitializer(BaseInitializer):
                                        / gilbert_n_particles.sum()).astype(int)
 
         _n = n_particles - gilbert_n_particles.sum()
-        _indices = np.random.choice(len(self.gilbert_curve), abs(_n))
+        if _n >= 0:
+            _indices = np.random.choice(len(self.gilbert_curve), abs(_n))
+        else:
+            _indices = np.random.choice(np.where(gilbert_n_particles > 0)[0],
+                                        abs(_n), replace=False)
         _gilbert_n_particles = np.array([
             (_indices == i).sum()
             for i, _ in enumerate(self.gilbert_curve)])

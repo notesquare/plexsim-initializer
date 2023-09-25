@@ -690,7 +690,7 @@ class BaseInitializer:
         if avg_n_particles > self.chunk_size * 2:
             _create_dataset_kwargs = self.create_dataset_kwargs.copy()
             _create_dataset_kwargs['chunks'] = (self.chunk_size,)
-        for axis in self.axis_labels:
+        for i, axis in enumerate(self.axis_labels):
             # X
             _path = f'position/{axis}'
             h5_group.create_dataset(_path, (n_particles + 1, ),
