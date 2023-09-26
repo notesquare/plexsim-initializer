@@ -109,7 +109,7 @@ class BaseInitializer:
         self.constant_induced_field_center = constant_induced_field_center
 
         self.create_dataset_kwargs = dict(
-            chunks=True, shuffle=True, compression='lzf'
+            chunks=True, shuffle=True, compression='gzip'
         )
 
         self.particles = dict()
@@ -579,7 +579,7 @@ class BaseInitializer:
 
             with h5py.File(grid_fp, 'a') as grid_h5f:
                 # create external link in
-                h5f[p_path] = h5py.ExternalLink(grid_fp, p_path)
+                h5f[p_path] = h5py.ExternalLink(grid_fp.name, p_path)
 
                 # serialize tracking particles
                 n_track_particles = initial_condition.get('tracking', {}) \
@@ -603,7 +603,7 @@ class BaseInitializer:
                     )
 
                     # create external link in
-                    h5f[tracked_path] = h5py.ExternalLink(grid_fp,
+                    h5f[tracked_path] = h5py.ExternalLink(grid_fp.name,
                                                           tracked_path)
 
                     tracking_start_id += n_track_particles
