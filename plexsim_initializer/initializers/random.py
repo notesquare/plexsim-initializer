@@ -3,7 +3,6 @@ import numpy as np
 import h5py
 
 from .base import BaseInitializer
-from ..lib.common import compute_grid_velocity
 
 
 @njit
@@ -108,8 +107,15 @@ class RandomInitializer(BaseInitializer):
                 )
 
                 if self.save_state:
-                    compute_grid_velocity(
-                        X, U, C_idx, grid_n, grid_U, grid_U2)
+                    if self.coordinate_system == 'cartesian':
+                        from ..lib.cartesian import compute_grid_velocity
+                        compute_grid_velocity(
+                            X, U, C_idx, grid_n, grid_U, grid_U2)
+                    elif self.coordinate_system == 'cylindrical':
+                        from ..lib.cylindrical import compute_grid_velocity
+                        compute_grid_velocity(
+                            X, U, C_idx, grid_n, grid_U, grid_U2,
+                            self.cell_size[1], self.r0, self.grid_shape[2])
                 # serialize
                 X = np.nextafter(X + C_idx, C_idx)
                 for i, axis in enumerate(self.axis_labels):

@@ -183,7 +183,8 @@ class CylindricalInitializer(BaseInitializer):
 
     @property
     def magnetic_E(self, c=2.99792458e8, _m=9.1093837e-31, _e=1.602-19):
-        cell_volume = np.expand_dims(self.cell_volume, -1) / np.power(2*np.pi, 3)
+        cell_volume = np.expand_dims(self.cell_volume, -1)\
+            * np.power(self.scale_length / (2 * np.pi), 3)
         factor = 2 * np.pi * c * _m / (_e * self.scale_length)
 
         B_grid_total = self.yee_to_grid_B(self.B_external + self.B_induced)
@@ -205,7 +206,8 @@ class CylindricalInitializer(BaseInitializer):
 
     @property
     def electric_E(self, c=2.99792458e8, _m=9.1093837e-31, _e=1.602-19):
-        cell_volume = np.expand_dims(self.cell_volume, -1) / np.power(2*np.pi, 3)
+        cell_volume = np.expand_dims(self.cell_volume, -1)\
+            * np.power(self.scale_length / (2 * np.pi), 3)
         factor = 2 * np.pi * np.power(c, 2) * _m / (_e * self.scale_length)
 
         E_grid_total = self.yee_to_grid_E(self.E_external + self.E_induced)

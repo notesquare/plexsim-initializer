@@ -4,10 +4,7 @@ import numpy as np
 import h5py
 
 from .base import BaseInitializer
-from ..lib.common import (
-    node_to_center_3d,
-    compute_grid_velocity
-)
+from ..lib.common import node_to_center_3d
 
 
 def get_v_table(nvts=3.3):
@@ -86,7 +83,8 @@ class MaxwellianInitializer(BaseInitializer):
         node_to_center_3d(density, density_center, self.coordinate_system)
         node_to_center_3d(current_density, j_center, self.coordinate_system)
 
-        cell_volume = self.cell_volume / np.power(2*np.pi, 3)
+        cell_volume = self.cell_volume * \
+            np.power(self.scale_length / (2 * np.pi), 3)
         node_to_center_3d(density * cell_volume / n_computational_to_physical,
                           n_particles_in_cell, self.coordinate_system)
 
@@ -155,8 +153,15 @@ class MaxwellianInitializer(BaseInitializer):
                     dtype_X, dtype_U)
 
                 if self.save_state:
-                    compute_grid_velocity(
-                        X, U, C_idx, grid_n, grid_U, grid_U2)
+                    if self.coordinate_system == 'cartesian':
+                        from ..lib.cartesian import compute_grid_velocity
+                        compute_grid_velocity(
+                            X, U, C_idx, grid_n, grid_U, grid_U2)
+                    elif self.coordinate_system == 'cylindrical':
+                        from ..lib.cylindrical import compute_grid_velocity
+                        compute_grid_velocity(
+                            X, U, C_idx, grid_n, grid_U, grid_U2,
+                            self.cell_size[1], self.r0, self.grid_shape[2])
                 # serialize
                 X = np.nextafter(X + C_idx, C_idx)
                 for i, axis in enumerate(self.axis_labels):

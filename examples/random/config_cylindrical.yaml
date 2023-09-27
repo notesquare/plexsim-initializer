@@ -47,4 +47,4 @@ simulation:
   backend: local
   chunk_size: 5.e+6
   iteration_encoding: file
-  save_state: No  # Not Implemented yet
+  save_state: Yes

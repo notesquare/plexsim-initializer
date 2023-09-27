@@ -877,8 +877,7 @@ class BaseInitializer:
             U_group[axis].attrs['unitSI'] = np.float64(1)
 
     def setup_state(self, h5f, iteration=0, density_threshold=1e-10,
-                    _e=1.602e-19, _m=9.1093837e-31):
-        raise NotImplementedError('Computing state is not implemented yet.')
+                    _e=1.602e-19, _m=9.1093837e-31, c=2.99792458e8):
         fields_path = self.base_path(h5f, iteration) \
             + np.string_(h5f.attrs['meshesPath'])
         fields_group = h5f.require_group(fields_path)
@@ -889,8 +888,8 @@ class BaseInitializer:
             n_computational_to_physical = \
                 grid_values['n_computational_to_physical']
             grid_n = grid_values['grid_n']
-            grid_U = grid_values['grid_U']
-            grid_U2 = grid_values['grid_U2']
+            grid_U = grid_values['grid_U'] * c
+            grid_U2 = grid_values['grid_U2'] * np.power(c, 2)
 
             mask = grid_n > density_threshold
             grid_U[mask] = np.divide(grid_U[mask],
@@ -903,8 +902,10 @@ class BaseInitializer:
 
             grid_T = grid_U2 * m / (3 * abs(q))
 
+            cell_volume = self.cell_volume * \
+                np.power(self.scale_length / (2 * np.pi), 3)
             grid_n = grid_n * n_computational_to_physical\
-                / self.cell_volume
+                / cell_volume
 
             if self.constant_external_field_node is not None:
                 grid_n[tuple(axis for axis in
