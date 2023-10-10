@@ -57,6 +57,17 @@ class CylindricalInitializer(BaseInitializer):
 
     @property
     def cell_volume(self):
+        # returns cell volume arrays by r-index
+        nr = self.grid_shape[1]
+        dr = self.cell_size[1]
+
+        cell_volume_by_r = self.cell_size.prod() * (
+            (np.arange(nr) + 0.5) * dr + self.r0)
+        return cell_volume_by_r.reshape(1, -1, 1)
+
+    @property
+    def cell_volume_by_grid(self):
+        # returns cell volume defined on grids by r-index
         nr = self.grid_shape[1]
         dr = self.cell_size[1]
 
@@ -191,16 +202,14 @@ class CylindricalInitializer(BaseInitializer):
         grid_center_shape = np.array((*(self.grid_shape), 3))
         B_center = np.empty(grid_center_shape)
 
-        node_to_center_3d(B_grid_total * cell_volume, B_center,
-                          self.coordinate_system)
+        node_to_center_3d(B_grid_total, B_center, self.coordinate_system)
         magnetic_E = 0.5 * self.permeability * \
-            (B_center * B_center).sum() * np.power(factor, 2)
+            (B_center * B_center * cell_volume).sum() * np.power(factor, 2)
 
         B_grid_induced = self.yee_to_grid_B(self.B_induced)
-        node_to_center_3d(B_grid_induced * cell_volume, B_center,
-                          self.coordinate_system)
+        node_to_center_3d(B_grid_induced, B_center, self.coordinate_system)
         induced_magnetic_E = 0.5 * self.permeability * \
-            (B_center * B_center).sum() * np.power(factor, 2)
+            (B_center * B_center * cell_volume).sum() * np.power(factor, 2)
 
         return magnetic_E, induced_magnetic_E
 
@@ -214,15 +223,13 @@ class CylindricalInitializer(BaseInitializer):
         grid_center_shape = np.array((*(self.grid_shape), 3))
         E_center = np.empty(grid_center_shape)
 
-        node_to_center_3d(E_grid_total * cell_volume, E_center,
-                          self.coordinate_system)
+        node_to_center_3d(E_grid_total, E_center, self.coordinate_system)
         electric_E = 0.5 * self.permittivity * \
-            (E_center * E_center).sum() * np.power(factor, 2)
+            (E_center * E_center * cell_volume).sum() * np.power(factor, 2)
 
         E_grid_induced = self.yee_to_grid_E(self.E_induced)
-        node_to_center_3d(E_grid_induced * cell_volume, E_center,
-                          self.coordinate_system)
+        node_to_center_3d(E_grid_induced, E_center, self.coordinate_system)
         induced_electric_E = 0.5 * self.permittivity * \
-            (E_center * E_center).sum() * np.power(factor, 2)
+            (E_center * E_center * cell_volume).sum() * np.power(factor, 2)
 
         return electric_E, induced_electric_E

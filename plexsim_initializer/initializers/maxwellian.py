@@ -83,7 +83,7 @@ class MaxwellianInitializer(BaseInitializer):
         node_to_center_3d(density, density_center, self.coordinate_system)
         node_to_center_3d(current_density, j_center, self.coordinate_system)
 
-        cell_volume = self.cell_volume * \
+        cell_volume = self.cell_volume_by_grid * \
             np.power(self.scale_length / (2 * np.pi), 3)
         node_to_center_3d(density * cell_volume / n_computational_to_physical,
                           n_particles_in_cell, self.coordinate_system)

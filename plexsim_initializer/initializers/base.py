@@ -902,7 +902,7 @@ class BaseInitializer:
 
             grid_T = grid_U2 * m / (3 * abs(q))
 
-            cell_volume = self.cell_volume * \
+            cell_volume = self.cell_volume_by_grid * \
                 np.power(self.scale_length / (2 * np.pi), 3)
             grid_n = grid_n * n_computational_to_physical\
                 / cell_volume
