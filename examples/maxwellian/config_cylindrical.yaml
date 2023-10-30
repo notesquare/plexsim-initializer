@@ -2,12 +2,14 @@ initializer: maxwellian
 
 environment:
   coordinate_system: cylindrical
-  grid_shape: [64, 64, 10]
+  grid_shape: [64, 64, 30]
   cell_size: [0.07190764, 0.05594311]
   scale_length: 1.
   r0: 0.43281836
   external_magnetic_field: ./data/input-cylindrical/B_cyl.npy
   external_electric_field: [0, 0, 0]
+  induced_magnetic_field: ./data/input-cylindrical/B_ind_cyl.npy
+  induced_electric_field: ./data/input-cylindrical/E_ind_cyl.npy
   field_dtype: fp64
   relative_permittivity: 1
   relative_permeability: 1
