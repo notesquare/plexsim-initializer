@@ -49,7 +49,7 @@ class CylindricalInitializer(BaseInitializer):
     def B_shape(self):
         nz, nr, nphi = self.grid_shape
         return nz, nr, nphi, 3
-    
+
     @property
     def E_shape(self):
         nz, nr, nphi = self.grid_shape
@@ -120,6 +120,42 @@ class CylindricalInitializer(BaseInitializer):
             timeOffset=0.
         )
 
+    @property
+    def J_attrs(self):
+        return dict(
+            geometry=np.string_(self.coordinate_system),
+            gridSpacing=self.cell_size,
+            gridGlobalOffset=self.grid_global_offset,
+            gridUnitSI=np.float64(1),
+            dataOrder=np.string_('C'),
+            axisLabels=np.array(self.axis_labels).astype(np.string_),
+            unitDimension=np.array(
+                [-2, 0, 0, 1, 0, 0, 0], dtype=np.float64),
+            fieldSmoothing=np.string_('none'),
+            timeOffset=0.
+        )
+
+    def write_J(self, fields_group, _e=1.602e-19, c=2.99792458e8):
+        J_group = fields_group.require_group(np.string_('J_vacuum'))
+
+        J_attrs = self.J_attrs
+        self.write_settings(J_group, J_attrs)
+
+        w = 2 * np.pi * c / self.scale_length
+        m = self.scale_length / (2 * np.pi)
+        J_norm = m ** 2 / (_e * w)
+        fJ = 2.224e-13 / self.scale_length
+        J_vac = self.grid_to_yee_E(self.J_vac * J_norm * fJ)
+
+        axis_labels = [np.string_(v) for v in self.axis_labels]
+        dimension = len(self.grid_shape)
+        for i, axis in enumerate(axis_labels):
+            J_group.create_dataset(axis, data=J_vac[..., i],
+                                   **self.create_dataset_kwargs)
+            J_group[axis].attrs['position'] = np.zeros(
+                dimension, dtype=J_vac.dtype)
+            J_group[axis].attrs['unitSI'] = np.float64(1)
+
     def position_offset_attrs(self, n_particles):
         return dict(
             macroWeighted=np.uint32(1),
@@ -127,7 +163,7 @@ class CylindricalInitializer(BaseInitializer):
             timeOffset=0.,
             unitDimension=np.array([1, 0, 0, 0, 0, 0, 0], dtype=np.float64),
             **{axis: dict(
-                value=np.float32(0)+self.r0 if axis =='r' else np.float32(0),
+                value=np.float32(0)+self.r0 if axis == 'r' else np.float32(0),
                 shape=np.array([n_particles], dtype=np.uint64),
                 unitSI=np.float64(1)
             ) for axis in self.axis_labels}
@@ -191,6 +227,17 @@ class CylindricalInitializer(BaseInitializer):
 
         nz, nr, nphi = self.grid_shape
         return np.swapaxes(fg.reshape(nphi + 1, nr + 1, nz + 1, 3), 0, 2)
+
+    def grid_to_yee_E(self, E):
+        fg = np.swapaxes(E, 0, 2).flatten()
+        f = np.empty(3 * self.grid_shape.prod(), dtype=E.dtype)
+
+        f[self.cbc] = 0.5 * (fg[self.rgn[0, :]] + fg[self.rgn[1, :]])
+        f[self.cbc+1] = 0.5 * (fg[self.rgn[0, :] + 1] + fg[self.rgn[2, :] + 1])
+        f[self.cbc+2] = 0.5 * (fg[self.rgn[0, :] + 2] + fg[self.rgn[4, :] + 2])
+
+        nz, nr, nphi = self.grid_shape
+        return np.swapaxes(f.reshape(nphi, nr, nz, 3), 0, 2)
 
     @property
     def magnetic_E(self, c=2.99792458e8, _m=9.1093837e-31, _e=1.602-19):

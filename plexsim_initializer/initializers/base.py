@@ -9,7 +9,6 @@ import numpy.ma as ma
 from ..lib.gilbert3d import gilbert3d
 from ..lib.common import (
     SavedFlag,
-    node_to_center_3d,
     remove_cycle_pattern_from_filename
 )
 
@@ -364,6 +363,11 @@ class BaseInitializer:
         self.write_B(fields)
         self.write_E(fields)
 
+        self.J_vac = self.load_field_array(
+            self.environment_config.get('vacuum_current_density', [0, 0, 0]),
+            (*self.grid_vertex_shape, 3), field_dtype)
+        self.write_J(fields)
+
         return SavedFlag.fields
 
     @property
@@ -426,6 +430,9 @@ class BaseInitializer:
             E_induced_group[axis].attrs['position'] = np.zeros(
                 dimension, dtype=self.E_induced.dtype)
             E_induced_group[axis].attrs['unitSI'] = np.float64(1)
+
+    def write_J(self, fields_group):
+        raise NotImplementedError()
 
     def load_particles(self, dtype_X, dtype_U, particles, grid_config):
         raise NotImplementedError()

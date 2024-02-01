@@ -28,8 +28,9 @@ def initialize(input_fp, out_fp, author='unspecified'):
             class Initializer(MaxwellianInitializer, CylindricalInitializer):
                 pass
         else:
-            print(f'Unkown coordinate system: {coordinate_system}', file=sys.stderr)
-            sys.exit(1)    
+            print(f'Unkown coordinate system: {coordinate_system}',
+                  file=sys.stderr)
+            sys.exit(1)
     elif initializer == 'random':
         if coordinate_system == 'cartesian':
             class Initializer(RandomInitializer, CartesianInitializer):
@@ -38,8 +39,9 @@ def initialize(input_fp, out_fp, author='unspecified'):
             class Initializer(RandomInitializer, CylindricalInitializer):
                 pass
         else:
-            print(f'Unkown coordinate system: {coordinate_system}', file=sys.stderr)
-            sys.exit(1)    
+            print(f'Unkown coordinate system: {coordinate_system}',
+                  file=sys.stderr)
+            sys.exit(1)
     else:
         print(f'Unkown Initializer: {initializer}', file=sys.stderr)
         sys.exit(1)

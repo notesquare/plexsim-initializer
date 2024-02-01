@@ -75,6 +75,36 @@ class CartesianInitializer(BaseInitializer):
             timeOffset=0.
         )
 
+    @property
+    def J_attrs(self):
+        return dict(
+            geometry=np.string_(self.coordinate_system),
+            gridSpacing=self.cell_size,
+            gridGlobalOffset=self.grid_global_offset,
+            gridUnitSI=np.float64(1),
+            dataOrder=np.string_('C'),
+            axisLabels=np.array(self.axis_labels).astype(np.string_),
+            unitDimension=np.array(
+                [-2, 0, 0, 1, 0, 0, 0], dtype=np.float64),
+            fieldSmoothing=np.string_('none'),
+            timeOffset=0.
+        )
+
+    def write_J(self, fields_group):
+        J_group = fields_group.require_group(np.string_('J_vacuum'))
+
+        J_attrs = self.J_attrs
+        self.write_settings(J_group, J_attrs)
+
+        axis_labels = [np.string_(v) for v in self.axis_labels]
+        dimension = len(self.grid_shape)
+        for i, axis in enumerate(axis_labels):
+            J_group.create_dataset(axis, data=self.J_vac[..., i],
+                                   **self.create_dataset_kwargs)
+            J_group[axis].attrs['position'] = np.zeros(
+                dimension, dtype=self.J_vac.dtype)
+            J_group[axis].attrs['unitSI'] = np.float64(1)
+
     def position_offset_attrs(self, n_particles):
         return dict(
             macroWeighted=np.uint32(1),

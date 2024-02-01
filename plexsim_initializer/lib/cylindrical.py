@@ -23,7 +23,7 @@ def node_to_center_cylindrical(V, V_center):
 @njit
 def weight_function(X, cell_index, dr, r0):
     z, r, phi = X
-    
+
     xi = (1 - z, z)
     eta = ((1 - r) * (2 * r0 + dr * (2 * cell_index[1] + r + 1)),
            r * (2 * r0 + dr * (2 * cell_index[1] + r)))
