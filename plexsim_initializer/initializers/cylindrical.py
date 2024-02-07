@@ -145,7 +145,7 @@ class CylindricalInitializer(BaseInitializer):
         m = self.scale_length / (2 * np.pi)
         J_norm = m ** 2 / (_e * w)
         fJ = 2.224e-13 / self.scale_length
-        J_vac = self.grid_to_yee_E(self.J_vac * J_norm * fJ)
+        J_vac = self.J_vac * J_norm * fJ
 
         axis_labels = [np.string_(v) for v in self.axis_labels]
         dimension = len(self.grid_shape)

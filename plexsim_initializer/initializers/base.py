@@ -365,7 +365,7 @@ class BaseInitializer:
 
         self.J_vac = self.load_field_array(
             self.environment_config.get('vacuum_current_density', [0, 0, 0]),
-            (*self.grid_vertex_shape, 3), field_dtype)
+            self.E_shape, field_dtype)
         self.write_J(fields)
 
         return SavedFlag.fields
