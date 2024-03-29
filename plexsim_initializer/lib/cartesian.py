@@ -46,7 +46,7 @@ def add_density_velocity(cell_index, U, grid_n, grid_U, grid_U2, weight):
 
                 grid_n[_i, _j, _k] += weight[i][j][k]
                 grid_U[_i, _j, _k] += U * weight[i][j][k]
-                grid_U2[_i, _j, _k] += (U * U).sum() * weight[i][j][k]
+                grid_U2[_i, _j, _k] += U * U * weight[i][j][k]
 
 
 @njit

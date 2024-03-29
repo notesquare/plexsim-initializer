@@ -854,13 +854,22 @@ class BaseInitializer:
             unitDimension=np.array(
                 [2, 1, -3, -1, 0, 0, 0], dtype=np.float64),
             fieldSmoothing=np.string_('none'),
-            timeOffset=0.,
-            position=np.array([0, 0, 0], dtype=np.float64),
-            unitSI=np.float64(1)
+            timeOffset=0.
         )
-        fields_group.create_dataset(f'{particle_name}_T', data=grid_T,
-                                    **self.create_dataset_kwargs)
+        T_group = fields_group.require_group(f'{particle_name}_T')
         self.write_settings(fields_group[f'{particle_name}_T'], T_attrs)
+        for i, axis in enumerate(axis_labels):
+            T_group.create_dataset(axis, data=grid_T[..., i],
+                                   **self.create_dataset_kwargs)
+            T_group[axis].attrs['position'] = \
+                np.array([0, 0, 0], dtype=np.float64)
+            T_group[axis].attrs['unitSI'] = np.float64(1)
+
+        T_group.create_dataset('mean', data=grid_T.mean(axis=-1),
+                               **self.create_dataset_kwargs)
+        T_group['mean'].attrs['position'] = \
+            np.array([0, 0, 0], dtype=np.float64)
+        T_group['mean'].attrs['unitSI'] = np.float64(1)
 
         U_attrs = dict(
             geometry=np.string_(self.coordinate_system),
@@ -899,15 +908,17 @@ class BaseInitializer:
             grid_U2 = grid_values['grid_U2'] * np.power(c, 2)
 
             mask = grid_n > density_threshold
-            grid_U[mask] = np.divide(grid_U[mask],
-                                     np.expand_dims(grid_n, axis=-1)[mask])
+            _grid_n = np.expand_dims(grid_n, axis=-1)
+
+            grid_U[mask] = np.divide(grid_U[mask], _grid_n[mask])
             grid_U[~mask].fill(0)
-            grid_U2[mask] = np.divide(grid_U2[mask], grid_n[mask])
+
+            grid_U2[mask] = np.divide(grid_U2[mask], _grid_n[mask])
             grid_U2[~mask].fill(0)
 
-            grid_U2 -= (grid_U * grid_U).sum(axis=-1)
+            grid_U2 -= grid_U * grid_U
 
-            grid_T = grid_U2 * m / (3 * abs(q))
+            grid_T = grid_U2 * m / abs(q)
 
             cell_volume = self.cell_volume_by_grid * \
                 np.power(self.scale_length / (2 * np.pi), 3)

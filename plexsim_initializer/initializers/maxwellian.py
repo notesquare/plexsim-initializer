@@ -136,7 +136,7 @@ class MaxwellianInitializer(BaseInitializer):
         if self.save_state:
             grid_n = np.zeros(self.grid_vertex_shape, dtype=np.float64)
             grid_U = np.zeros((*self.grid_vertex_shape, 3), dtype=np.float64)
-            grid_U2 = np.zeros(self.grid_vertex_shape, dtype=np.float64)
+            grid_U2 = np.zeros((*self.grid_vertex_shape, 3), dtype=np.float64)
 
         with h5py.File(h5_fp, 'a') as h5f:
             kinetic_E = 0

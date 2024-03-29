@@ -44,7 +44,7 @@ def distribute_and_serialize(start, end, vth, velocity, cell_coords, h5_fp,
         if save_state:
             grid_n = np.zeros(self.grid_vertex_shape, dtype=np.float64)
             grid_U = np.zeros((*self.grid_vertex_shape, 3), dtype=np.float64)
-            grid_U2 = np.zeros(self.grid_vertex_shape, dtype=np.float64)
+            grid_U2 = np.zeros((*self.grid_vertex_shape, 3), dtype=np.float64)
 
     is_exist = (start is not None) and (start <= end)
     if is_exist:
@@ -111,7 +111,7 @@ class MaxwellianInitializer(MPIInitializer, _MaxwellianInitializer):
         if self.save_state:
             grid_n = np.zeros((self.grid_shape + 1), dtype=np.float64)
             grid_U = np.zeros((*(self.grid_shape + 1), 3), dtype=np.float64)
-            grid_U2 = np.zeros((self.grid_shape + 1), dtype=np.float64)
+            grid_U2 = np.zeros((*(self.grid_shape + 1), 3), dtype=np.float64)
 
         max_workers = self.max_workers
         n_tasks = gilbert_curve.shape[0]
