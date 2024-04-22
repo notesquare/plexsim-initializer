@@ -23,7 +23,7 @@ def distribute_random_normal_vector_length(V, l, s):  # noqa
 
 
 def _distribute_random(start, end, avg_velocity, cell_coords,
-                       dtype_X, dtype_U, c=2.99792458e8):
+                       dtype_X, dtype_U, _c):
     n_particles = end - start + 1
 
     X = np.random.random((n_particles, 3))
@@ -36,12 +36,12 @@ def _distribute_random(start, end, avg_velocity, cell_coords,
 
     C_idx = np.full((n_particles, 3), cell_coords)
 
-    U2 = (U * U).sum().item() * (c ** 2)
+    U2 = (U * U).sum().item() * (_c ** 2)
     return X, U, C_idx, U2
 
 
 class RandomInitializer(BaseInitializer):
-    def load_particles_pre(self, particles, grid_config):
+    def load_particles_pre(self, particles, grid_config, _e, _m):
         initial_condition = grid_config.get('initial_condition', {})
         n_particles = initial_condition.get('n_particles', 0)
         n_particles = int(n_particles)
@@ -69,7 +69,8 @@ class RandomInitializer(BaseInitializer):
             avg_velocity=avg_velocity
         ))
 
-    def load_particles(self, h5_fp, prefix, dtype_X, dtype_U, particles):
+    def load_particles(self, h5_fp, prefix, dtype_X, dtype_U,
+                       particles, _m, _c):
         gilbert_n_particles = particles['gilbert_n_particles']
 
         end_indices = gilbert_n_particles.cumsum() - 1
@@ -80,11 +81,11 @@ class RandomInitializer(BaseInitializer):
         self.distribute_random(
             h5_fp, prefix, start_indices, end_indices,
             np.array(self.gilbert_curve, dtype=np.int16),
-            particles, dtype_X, dtype_U
+            particles, dtype_X, dtype_U, _m, _c
         )
 
     def distribute_random(self, h5_fp, prefix, start_indices, end_indices,
-                          gilbert_curve, particles, dtype_X, dtype_U, _m=9.1093837e-31):
+                          gilbert_curve, particles, dtype_X, dtype_U, _m, _c):
         avg_velocity = particles['avg_velocity']
         m = particles['m'] * _m
         n_computational_to_physical = particles['n_computational_to_physical']
@@ -103,7 +104,7 @@ class RandomInitializer(BaseInitializer):
                     continue
 
                 X, U, C_idx, U2 = _distribute_random(
-                    start, end, avg_velocity, cell_coords, dtype_X, dtype_U
+                    start, end, avg_velocity, cell_coords, dtype_X, dtype_U, _c
                 )
 
                 if self.save_state:

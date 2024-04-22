@@ -33,7 +33,7 @@ def get_v_table(nvts=3.3):
 
 
 def _distribute_maxwellian(start, end, vth, velocity, cell_coords,
-                           v_table, dtype_X, dtype_U, c=2.99792458e8):
+                           v_table, dtype_X, dtype_U, _c):
     n_particles = end - start + 1
 
     X = np.random.random((n_particles, 3))
@@ -43,16 +43,15 @@ def _distribute_maxwellian(start, end, vth, velocity, cell_coords,
 
     n_velocity_dist = v_table.shape[0]
     indices = np.random.choice(n_velocity_dist, n_particles)
-    U[:] = (vth * v_table[indices] + velocity) / c
+    U[:] = (vth * v_table[indices] + velocity) / _c
     C_idx = np.full((n_particles, 3), cell_coords)
 
-    U2 = (U * U).sum().item() * (c ** 2)
+    U2 = (U * U).sum().item() * (_c ** 2)
     return X, U, C_idx, U2
 
 
 class MaxwellianInitializer(BaseInitializer):
-    def load_particles_pre(self, particles, grid_config,
-                           _e=1.602e-19, _m=9.1093837e-31):
+    def load_particles_pre(self, particles, grid_config, _e, _m):
         q = particles['q'] * _e
         m = particles['m'] * _m
 
@@ -83,8 +82,11 @@ class MaxwellianInitializer(BaseInitializer):
         node_to_center_3d(density, density_center, self.coordinate_system)
         node_to_center_3d(current_density, j_center, self.coordinate_system)
 
-        cell_volume = self.cell_volume_by_grid * \
-            np.power(self.scale_length / (2 * np.pi), 3)
+        if self.coordinate_system == 'cylindrical':
+            cell_volume = self.cell_volume_by_grid * \
+                np.power(self.scale_length / (2 * np.pi), 3)
+        elif self.coordinate_system == 'cartesian':
+            cell_volume = self.cell_volume
         node_to_center_3d(density * cell_volume / n_computational_to_physical,
                           n_particles_in_cell, self.coordinate_system)
 
@@ -111,7 +113,8 @@ class MaxwellianInitializer(BaseInitializer):
             gilbert_drifted_velocity=gilbert_drifted_velocity
         ))
 
-    def load_particles(self, h5_fp, prefix, dtype_X, dtype_U, particles):
+    def load_particles(self, h5_fp, prefix, dtype_X, dtype_U,
+                       particles, _m, _c):
         gilbert_n_particles = particles['gilbert_n_particles']
 
         end_indices = gilbert_n_particles.cumsum() - 1
@@ -122,12 +125,12 @@ class MaxwellianInitializer(BaseInitializer):
         self.distribute_maxwellian(
             h5_fp, prefix, start_indices, end_indices,
             np.array(self.gilbert_curve, dtype=np.int16),
-            get_v_table(), particles, dtype_X, dtype_U
+            get_v_table(), particles, dtype_X, dtype_U, _m, _c
         )
 
     def distribute_maxwellian(self, h5_fp, prefix, start_indices, end_indices,
                               gilbert_curve, v_table, particles,
-                              dtype_X, dtype_U, _m=9.1093837e-31):
+                              dtype_X, dtype_U, _m, _c):
         vth_list = particles['gilbert_vth']
         velocity_list = particles['gilbert_drifted_velocity']
         m = particles['m'] * _m
@@ -150,7 +153,7 @@ class MaxwellianInitializer(BaseInitializer):
 
                 X, U, C_idx, U2 = _distribute_maxwellian(
                     start, end, vth, velocity, cell_coords, v_table,
-                    dtype_X, dtype_U)
+                    dtype_X, dtype_U, _c)
 
                 if self.save_state:
                     if self.coordinate_system == 'cartesian':

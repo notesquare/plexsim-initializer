@@ -102,7 +102,7 @@ class MaxwellianInitializer(MPIInitializer, _MaxwellianInitializer):
 
     def distribute_maxwellian(self, h5_fp, prefix, start_indices, end_indices,
                               gilbert_curve, v_table, particles,
-                              dtype_X, dtype_U, _m=9.1093837e-31):
+                              dtype_X, dtype_U, _m):
         vth_list = particles['gilbert_vth']
         velocity_list = particles['gilbert_drifted_velocity']
         m = particles['m'] * _m
