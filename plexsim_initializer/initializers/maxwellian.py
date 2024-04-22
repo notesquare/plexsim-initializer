@@ -4,10 +4,7 @@ import numpy as np
 import h5py
 
 from .base import BaseInitializer
-from ..lib.common import (
-    node_to_center_3d,
-    compute_grid_velocity
-)
+from ..lib.common import node_to_center_3d
 
 
 def get_v_table(nvts=3.3):
@@ -36,7 +33,7 @@ def get_v_table(nvts=3.3):
 
 
 def _distribute_maxwellian(start, end, vth, velocity, cell_coords,
-                           v_table, dtype_X, dtype_U):
+                           v_table, dtype_X, dtype_U, _c):
     n_particles = end - start + 1
 
     X = np.random.random((n_particles, 3))
@@ -46,17 +43,17 @@ def _distribute_maxwellian(start, end, vth, velocity, cell_coords,
 
     n_velocity_dist = v_table.shape[0]
     indices = np.random.choice(n_velocity_dist, n_particles)
-    U[:] = vth * v_table[indices] + velocity
+    U[:] = (vth * v_table[indices] + velocity) / _c
     C_idx = np.full((n_particles, 3), cell_coords)
 
-    U2 = (U * U).sum().item()
+    U2 = (U * U).sum().item() * (_c ** 2)
     return X, U, C_idx, U2
 
 
 class MaxwellianInitializer(BaseInitializer):
-    def load_particles_pre(self, particles, grid_config):
-        q = particles['q']
-        m = particles['m']
+    def load_particles_pre(self, particles, grid_config, _e, _m):
+        q = particles['q'] * _e
+        m = particles['m'] * _m
 
         initial_condition = grid_config.get('initial_condition', {})
         temperature = initial_condition['temperature']
@@ -79,13 +76,20 @@ class MaxwellianInitializer(BaseInitializer):
         vth_center = np.empty(self.grid_shape, dtype=thermal_velocity.dtype)
         density_center = np.empty(self.grid_shape, dtype=density.dtype)
         j_center = np.empty((*self.grid_shape, 3), dtype=current_density.dtype)
+        n_particles_in_cell = np.empty(self.grid_shape, dtype=density.dtype)
 
         node_to_center_3d(thermal_velocity, vth_center, self.coordinate_system)
         node_to_center_3d(density, density_center, self.coordinate_system)
         node_to_center_3d(current_density, j_center, self.coordinate_system)
 
-        n_particles_in_cell = density_center * \
-            self.cell_size.prod() / n_computational_to_physical
+        if self.coordinate_system == 'cylindrical':
+            cell_volume = self.cell_volume_by_grid * \
+                np.power(self.scale_length / (2 * np.pi), 3)
+        elif self.coordinate_system == 'cartesian':
+            cell_volume = self.cell_volume
+        node_to_center_3d(density * cell_volume / n_computational_to_physical,
+                          n_particles_in_cell, self.coordinate_system)
+
         assert np.all(n_particles_in_cell < np.iinfo(np.int64).max)
         n_particles_in_cell = np.around(n_particles_in_cell).astype(int)
 
@@ -109,7 +113,8 @@ class MaxwellianInitializer(BaseInitializer):
             gilbert_drifted_velocity=gilbert_drifted_velocity
         ))
 
-    def load_particles(self, h5_fp, prefix, dtype_X, dtype_U, particles):
+    def load_particles(self, h5_fp, prefix, dtype_X, dtype_U,
+                       particles, _m, _c):
         gilbert_n_particles = particles['gilbert_n_particles']
 
         end_indices = gilbert_n_particles.cumsum() - 1
@@ -120,21 +125,21 @@ class MaxwellianInitializer(BaseInitializer):
         self.distribute_maxwellian(
             h5_fp, prefix, start_indices, end_indices,
             np.array(self.gilbert_curve, dtype=np.int16),
-            get_v_table(), particles, dtype_X, dtype_U
+            get_v_table(), particles, dtype_X, dtype_U, _m, _c
         )
 
     def distribute_maxwellian(self, h5_fp, prefix, start_indices, end_indices,
                               gilbert_curve, v_table, particles,
-                              dtype_X, dtype_U):
+                              dtype_X, dtype_U, _m, _c):
         vth_list = particles['gilbert_vth']
         velocity_list = particles['gilbert_drifted_velocity']
-        m = particles['m']
+        m = particles['m'] * _m
         n_computational_to_physical = particles['n_computational_to_physical']
 
         if self.save_state:
             grid_n = np.zeros(self.grid_vertex_shape, dtype=np.float64)
             grid_U = np.zeros((*self.grid_vertex_shape, 3), dtype=np.float64)
-            grid_U2 = np.zeros(self.grid_vertex_shape, dtype=np.float64)
+            grid_U2 = np.zeros((*self.grid_vertex_shape, 3), dtype=np.float64)
 
         with h5py.File(h5_fp, 'a') as h5f:
             kinetic_E = 0
@@ -148,11 +153,18 @@ class MaxwellianInitializer(BaseInitializer):
 
                 X, U, C_idx, U2 = _distribute_maxwellian(
                     start, end, vth, velocity, cell_coords, v_table,
-                    dtype_X, dtype_U)
+                    dtype_X, dtype_U, _c)
 
                 if self.save_state:
-                    compute_grid_velocity(
-                        X, U, C_idx, grid_n, grid_U, grid_U2)
+                    if self.coordinate_system == 'cartesian':
+                        from ..lib.cartesian import compute_grid_velocity
+                        compute_grid_velocity(
+                            X, U, C_idx, grid_n, grid_U, grid_U2)
+                    elif self.coordinate_system == 'cylindrical':
+                        from ..lib.cylindrical import compute_grid_velocity
+                        compute_grid_velocity(
+                            X, U, C_idx, grid_n, grid_U, grid_U2,
+                            self.cell_size[1], self.r0, self.grid_shape[2])
                 # serialize
                 X = np.nextafter(X + C_idx, C_idx)
                 for i, axis in enumerate(self.axis_labels):

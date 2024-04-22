@@ -2,12 +2,12 @@ initializer: random
 
 environment:
   coordinate_system: cylindrical
-  grid_shape: [3, 5, 4]  # z, r, phi
+  grid_shape: [7, 6, 8]  # z, r, phi
   cell_size: [0.1, 0.1]  # z, r
   scale_length: 1.e-6
-  r0: 0.1
-  external_magnetic_field: [0.2, 0.2, 0.2]
-  external_electric_field: [1.0, 1.0, 1.0]
+  r0: 6.e-2
+  external_magnetic_field: [2.e-2, 2.e-2, 0]
+  external_electric_field: [0, 0, 0]
   field_dtype: fp64
   relative_permittivity: 1
   relative_permeability: 1
@@ -22,7 +22,7 @@ grids:
     n_computational_to_physical: 1.e+5
     initial_condition:
       n_particles: 1000
-      avg_velocity: 3.e+6
+      avg_velocity: 0.01  # rel to c
 
       tracking:
         n_particles: 20
@@ -37,7 +37,7 @@ grids:
     n_computational_to_physical: 1.e+5
     initial_condition:
       n_particles: 1000
-      avg_velocity: 1.e+6
+      avg_velocity: 0.003  # rel to c
 
       tracking:
         n_particles: 20
@@ -47,4 +47,4 @@ simulation:
   backend: local
   chunk_size: 5.e+6
   iteration_encoding: file
-  save_state: No  # Not Implemented yet
+  save_state: Yes

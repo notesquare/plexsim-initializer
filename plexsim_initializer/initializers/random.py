@@ -3,7 +3,6 @@ import numpy as np
 import h5py
 
 from .base import BaseInitializer
-from ..lib.common import compute_grid_velocity
 
 
 @njit
@@ -23,8 +22,8 @@ def distribute_random_normal_vector_length(V, l, s):  # noqa
             V[i, j] *= _factor
 
 
-def _distribute_random(start, end, avg_velocity,
-                       cell_coords, dtype_X, dtype_U):
+def _distribute_random(start, end, avg_velocity, cell_coords,
+                       dtype_X, dtype_U, _c):
     n_particles = end - start + 1
 
     X = np.random.random((n_particles, 3))
@@ -37,12 +36,12 @@ def _distribute_random(start, end, avg_velocity,
 
     C_idx = np.full((n_particles, 3), cell_coords)
 
-    U2 = (U * U).sum().item()
+    U2 = (U * U).sum().item() * (_c ** 2)
     return X, U, C_idx, U2
 
 
 class RandomInitializer(BaseInitializer):
-    def load_particles_pre(self, particles, grid_config):
+    def load_particles_pre(self, particles, grid_config, _e, _m):
         initial_condition = grid_config.get('initial_condition', {})
         n_particles = initial_condition.get('n_particles', 0)
         n_particles = int(n_particles)
@@ -53,7 +52,11 @@ class RandomInitializer(BaseInitializer):
                                        / gilbert_n_particles.sum()).astype(int)
 
         _n = n_particles - gilbert_n_particles.sum()
-        _indices = np.random.choice(len(self.gilbert_curve), abs(_n))
+        if _n >= 0:
+            _indices = np.random.choice(len(self.gilbert_curve), abs(_n))
+        else:
+            _indices = np.random.choice(np.where(gilbert_n_particles > 0)[0],
+                                        abs(_n), replace=False)
         _gilbert_n_particles = np.array([
             (_indices == i).sum()
             for i, _ in enumerate(self.gilbert_curve)])
@@ -66,7 +69,8 @@ class RandomInitializer(BaseInitializer):
             avg_velocity=avg_velocity
         ))
 
-    def load_particles(self, h5_fp, prefix, dtype_X, dtype_U, particles):
+    def load_particles(self, h5_fp, prefix, dtype_X, dtype_U,
+                       particles, _m, _c):
         gilbert_n_particles = particles['gilbert_n_particles']
 
         end_indices = gilbert_n_particles.cumsum() - 1
@@ -77,19 +81,19 @@ class RandomInitializer(BaseInitializer):
         self.distribute_random(
             h5_fp, prefix, start_indices, end_indices,
             np.array(self.gilbert_curve, dtype=np.int16),
-            particles, dtype_X, dtype_U
+            particles, dtype_X, dtype_U, _m, _c
         )
 
     def distribute_random(self, h5_fp, prefix, start_indices, end_indices,
-                          gilbert_curve, particles, dtype_X, dtype_U):
+                          gilbert_curve, particles, dtype_X, dtype_U, _m, _c):
         avg_velocity = particles['avg_velocity']
-        m = particles['m']
+        m = particles['m'] * _m
         n_computational_to_physical = particles['n_computational_to_physical']
 
         if self.save_state:
             grid_n = np.zeros(self.grid_vertex_shape, dtype=np.float64)
             grid_U = np.zeros((*self.grid_vertex_shape, 3), dtype=np.float64)
-            grid_U2 = np.zeros(self.grid_vertex_shape, dtype=np.float64)
+            grid_U2 = np.zeros((*self.grid_vertex_shape, 3), dtype=np.float64)
 
         with h5py.File(h5_fp, 'a') as h5f:
             kinetic_E = 0
@@ -100,12 +104,19 @@ class RandomInitializer(BaseInitializer):
                     continue
 
                 X, U, C_idx, U2 = _distribute_random(
-                    start, end, avg_velocity, cell_coords, dtype_X, dtype_U
+                    start, end, avg_velocity, cell_coords, dtype_X, dtype_U, _c
                 )
 
                 if self.save_state:
-                    compute_grid_velocity(
-                        X, U, C_idx, grid_n, grid_U, grid_U2)
+                    if self.coordinate_system == 'cartesian':
+                        from ..lib.cartesian import compute_grid_velocity
+                        compute_grid_velocity(
+                            X, U, C_idx, grid_n, grid_U, grid_U2)
+                    elif self.coordinate_system == 'cylindrical':
+                        from ..lib.cylindrical import compute_grid_velocity
+                        compute_grid_velocity(
+                            X, U, C_idx, grid_n, grid_U, grid_U2,
+                            self.cell_size[1], self.r0, self.grid_shape[2])
                 # serialize
                 X = np.nextafter(X + C_idx, C_idx)
                 for i, axis in enumerate(self.axis_labels):

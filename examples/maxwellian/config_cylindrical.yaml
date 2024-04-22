@@ -2,12 +2,15 @@ initializer: maxwellian
 
 environment:
   coordinate_system: cylindrical
-  grid_shape: [30, 10, 10]
-  cell_size: [0.1, 0.1]
-  scale_length: 1.e-6
-  r0: 1.0
-  external_magnetic_field: [0.2, 0.2, 0.2]
-  external_electric_field: [1.0, 1.0, 1.0]
+  grid_shape: [44, 75, 30]
+  cell_size: [0.14726215, 0.05645049]
+  scale_length: 1.
+  r0: 0.53996123
+  external_magnetic_field: [0, 0, 0]
+  external_electric_field: [0, 0, 0]
+  induced_magnetic_field: ./data/input-cylindrical-39915/B_cyl.npy
+  induced_electric_field: [0, 0, 0]
+  vacuum_current_density: ./data/input-cylindrical-39915/J_ext_yee.npy
   field_dtype: fp64
   relative_permittivity: 1
   relative_permeability: 1
@@ -19,14 +22,14 @@ grids:
       X: fp64
       U: fp64
     n_splits: 2
-    n_computational_to_physical: 1.e+14
+    n_computational_to_physical: 2.11e+10
     initial_condition:
-      temperature: [10]  # [eV]
-      density: [1.e+18]  # [m^-3]
-      current_density: [0, 0, 0]
+      temperature: ./data/input-cylindrical-39915/Te.npy  # [eV]
+      density: ./data/input-cylindrical-39915/ne.npy  # [m^-3]
+      current_density: ./data/input-cylindrical-39915/J.npy
 
       tracking:
-        n_particles: 20
+        n_particles: 200
         sample: random
 
   -
@@ -35,13 +38,13 @@ grids:
       X: fp64
       U: fp64
     n_splits: 2
-    n_computational_to_physical: 1.e+14
+    n_computational_to_physical: 2.11e+10
     initial_condition:
-      temperature: [4]  # [eV]
-      density: [1.e+18]  # [m^-3]
+      temperature: ./data/input-cylindrical-39915/Ti.npy  # [eV]
+      density: ./data/input-cylindrical-39915/ni.npy  # [m^-3]
 
       tracking:
-        n_particles: 20
+        n_particles: 200
         sample: random
 
 simulation:

@@ -9,7 +9,6 @@ import numpy.ma as ma
 from ..lib.gilbert3d import gilbert3d
 from ..lib.common import (
     SavedFlag,
-    node_to_center_3d,
     remove_cycle_pattern_from_filename
 )
 
@@ -109,7 +108,7 @@ class BaseInitializer:
         self.constant_induced_field_center = constant_induced_field_center
 
         self.create_dataset_kwargs = dict(
-            chunks=True, shuffle=True, compression='lzf'
+            chunks=True, shuffle=True, compression='gzip'
         )
 
         self.particles = dict()
@@ -364,6 +363,11 @@ class BaseInitializer:
         self.write_B(fields)
         self.write_E(fields)
 
+        self.J_vac = self.load_field_array(
+            self.environment_config.get('vacuum_current_density', [0, 0, 0]),
+            self.E_shape, field_dtype)
+        self.write_J(fields)
+
         return SavedFlag.fields
 
     @property
@@ -426,6 +430,9 @@ class BaseInitializer:
             E_induced_group[axis].attrs['position'] = np.zeros(
                 dimension, dtype=self.E_induced.dtype)
             E_induced_group[axis].attrs['unitSI'] = np.float64(1)
+
+    def write_J(self, fields_group):
+        raise NotImplementedError()
 
     def load_particles(self, dtype_X, dtype_U, particles, grid_config):
         raise NotImplementedError()
@@ -511,106 +518,7 @@ class BaseInitializer:
         )
 
     def setup_particles(self, h5f, iteration=0):
-        flag = SavedFlag.particles
-
-        tracking_start_id = 1
-        for grid_index, grid_config in enumerate(self.grids_config):
-            # common vars
-            species = grid_config['species']
-            dtype = grid_config['dtype']
-            n_splits = grid_config['n_splits']
-            n_computational_to_physical = int(
-                grid_config['n_computational_to_physical'])
-            initial_condition = grid_config['initial_condition']
-
-            self.particles[grid_index] = dict(
-                species=species,
-                particle_name=grid_config['name'],
-                n_computational_to_physical=n_computational_to_physical
-            )
-
-            if species == 'electron':
-                q = grid_config.get('q', -1.602e-19)
-                m = grid_config.get('m', 9.11e-31)
-            elif species == 'ion':
-                q = grid_config.get('q', 1.602e-19)
-                m = grid_config.get('m', 1.67e-27)
-            else:
-                q = grid_config['q']
-                m = grid_config['m']
-            self.particles[grid_index].update(dict(q=q, m=m))
-
-            if dtype['X'] == 'fp32':
-                dtype_X = np.float32
-            elif dtype['X'] == 'fp64':
-                dtype_X = np.float64
-            else:
-                raise NotImplementedError()
-
-            if dtype['U'] == 'fp32':
-                dtype_U = np.float32
-            elif dtype['U'] == 'fp64':
-                dtype_U = np.float64
-            else:
-                raise NotImplementedError()
-
-            self.load_particles_pre(self.particles[grid_index], grid_config)
-
-            out_fp = Path(h5f.filename)
-
-            # serialize particles
-            grid_fp = out_fp.with_suffix(f'.g{grid_index}.h5')
-            particle_name = grid_config['name']
-
-            p_path = f'data/{iteration}/particles/{particle_name}'
-            with h5py.File(grid_fp, 'w') as grid_h5f:
-                particle_group = grid_h5f.require_group(p_path)
-                # custom attribute
-                particle_group.attrs['_gridIndex'] = grid_index
-                particle_group.attrs['_tracked'] = 0
-
-                particle_data = self.particles[grid_index]
-                self.write_particle_attrs(
-                    particle_group, particle_data, n_splits,
-                    n_computational_to_physical, dtype_X, dtype_U)
-
-            self.load_particles(
-                grid_fp, p_path, dtype_X, dtype_U, self.particles[grid_index])
-
-            with h5py.File(grid_fp, 'a') as grid_h5f:
-                # create external link in
-                h5f[p_path] = h5py.ExternalLink(grid_fp, p_path)
-
-                # serialize tracking particles
-                n_track_particles = initial_condition.get('tracking', {}) \
-                    .get('n_particles', 0)
-                n_particles = particle_data['n_particles']
-
-                if n_track_particles > n_particles:
-                    print('Warning: number of tracking particles cannot be'
-                          ' greater than number of particles.')
-                    n_track_particles = n_particles
-
-                if n_track_particles > 0:
-                    tracked_path = f'{p_path}_tracked'
-                    tracked_group = grid_h5f.require_group(tracked_path)
-
-                    particle_group = grid_h5f.require_group(p_path)
-                    self.serialize_tracked(
-                        tracked_group, grid_index, n_track_particles, q, m,
-                        n_computational_to_physical, n_particles,
-                        tracking_start_id, particle_group
-                    )
-
-                    # create external link in
-                    h5f[tracked_path] = h5py.ExternalLink(grid_fp,
-                                                          tracked_path)
-
-                    tracking_start_id += n_track_particles
-
-                    flag |= SavedFlag.tracked
-
-        return flag
+        raise NotImplementedError()
 
     def write_particle_patches_offset(self, patches, n_splits):
         raise NotImplementedError()
@@ -690,7 +598,7 @@ class BaseInitializer:
         if avg_n_particles > self.chunk_size * 2:
             _create_dataset_kwargs = self.create_dataset_kwargs.copy()
             _create_dataset_kwargs['chunks'] = (self.chunk_size,)
-        for axis in self.axis_labels:
+        for i, axis in enumerate(self.axis_labels):
             # X
             _path = f'position/{axis}'
             h5_group.create_dataset(_path, (n_particles + 1, ),
@@ -782,20 +690,7 @@ class BaseInitializer:
 
     @property
     def electric_E(self):
-        grid_center_shape = np.array((*(self.grid_shape), 3))
-        E_center = np.empty(grid_center_shape)
-
-        node_to_center_3d(self.E_external + self.E_induced,
-                          E_center, self.coordinate_system)
-        electric_E = 0.5 * self.cell_size.prod() * \
-            self.permittivity * (E_center * E_center).sum()
-
-        node_to_center_3d(self.E_induced, E_center,
-                          self.coordinate_system)
-        induced_electric_E = 0.5 * self.cell_size.prod() * \
-            self.permittivity * (E_center * E_center).sum()
-
-        return electric_E, induced_electric_E
+        raise NotImplementedError()
 
     def setup_stats(self, h5f, iteration=0):
         magnetic_E, induced_magnetic_E = self.magnetic_E
@@ -860,13 +755,22 @@ class BaseInitializer:
             unitDimension=np.array(
                 [2, 1, -3, -1, 0, 0, 0], dtype=np.float64),
             fieldSmoothing=np.string_('none'),
-            timeOffset=0.,
-            position=np.array([0, 0, 0], dtype=np.float64),
-            unitSI=np.float64(1)
+            timeOffset=0.
         )
-        fields_group.create_dataset(f'{particle_name}_T', data=grid_T,
-                                    **self.create_dataset_kwargs)
+        T_group = fields_group.require_group(f'{particle_name}_T')
         self.write_settings(fields_group[f'{particle_name}_T'], T_attrs)
+        for i, axis in enumerate(axis_labels):
+            T_group.create_dataset(axis, data=grid_T[..., i],
+                                   **self.create_dataset_kwargs)
+            T_group[axis].attrs['position'] = \
+                np.array([0, 0, 0], dtype=np.float64)
+            T_group[axis].attrs['unitSI'] = np.float64(1)
+
+        T_group.create_dataset('mean', data=grid_T.mean(axis=-1),
+                               **self.create_dataset_kwargs)
+        T_group['mean'].attrs['position'] = \
+            np.array([0, 0, 0], dtype=np.float64)
+        T_group['mean'].attrs['unitSI'] = np.float64(1)
 
         U_attrs = dict(
             geometry=np.string_(self.coordinate_system),
@@ -889,44 +793,6 @@ class BaseInitializer:
                                                        dtype=np.float64)
             U_group[axis].attrs['unitSI'] = np.float64(1)
 
-    def setup_state(self, h5f, iteration=0, density_threshold=1e-10):
-        fields_path = self.base_path(h5f, iteration) \
-            + np.string_(h5f.attrs['meshesPath'])
-        fields_group = h5f.require_group(fields_path)
-
-        for grid_index, grid_values in self.particles.items():
-            q = grid_values['q']
-            m = grid_values['m']
-            n_computational_to_physical = \
-                grid_values['n_computational_to_physical']
-            grid_n = grid_values['grid_n']
-            grid_U = grid_values['grid_U']
-            grid_U2 = grid_values['grid_U2']
-
-            mask = grid_n > density_threshold
-            grid_U[mask] = np.divide(grid_U[mask],
-                                     np.expand_dims(grid_n, axis=-1)[mask])
-            grid_U[~mask].fill(0)
-            grid_U2[mask] = np.divide(grid_U2[mask], grid_n[mask])
-            grid_U2[~mask].fill(0)
-
-            grid_U2 -= (grid_U * grid_U).sum(axis=-1)
-
-            grid_T = grid_U2 * m / (3 * abs(q))
-
-            # TODO: cell volume (cylindrical)
-            grid_n = grid_n * n_computational_to_physical\
-                / self.cell_size.prod()
-
-            if self.constant_external_field_node is not None:
-                grid_n[tuple(axis for axis in
-                             self.constant_external_field_node.T)] = 0
-                grid_U[tuple(axis for axis in
-                             self.constant_external_field_node.T)] = 0
-                grid_T[tuple(axis for axis in
-                             self.constant_external_field_node.T)] = 0
-
-            particle_name = grid_values['particle_name']
-            self.write_state(fields_group, particle_name, grid_n,
-                             grid_U, grid_T)
-        return SavedFlag.state
+    def setup_state(self, h5f, iteration=0, density_threshold=1e-10,
+                    _e=1.602e-19, _m=9.1093837e-31, c=2.99792458e8):
+        raise NotImplementedError()
