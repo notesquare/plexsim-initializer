@@ -246,7 +246,7 @@ class CylindricalInitializer(BaseInitializer):
         return np.swapaxes(f.reshape(nphi, nr, nz, 3), 0, 2)
 
     @property
-    def magnetic_E(self, c=2.99792458e8, _m=9.1093837e-31, _e=1.602-19):
+    def magnetic_E(self, c=2.99792458e8, _m=9.1093837e-31, _e=1.602e-19):
         cell_volume = np.expand_dims(self.cell_volume, -1)\
             * np.power(self.scale_length / (2 * np.pi), 3)
         factor = 2 * np.pi * c * _m / (_e * self.scale_length)
@@ -267,7 +267,7 @@ class CylindricalInitializer(BaseInitializer):
         return magnetic_E, induced_magnetic_E
 
     @property
-    def electric_E(self, c=2.99792458e8, _m=9.1093837e-31, _e=1.602-19):
+    def electric_E(self, c=2.99792458e8, _m=9.1093837e-31, _e=1.602e-19):
         cell_volume = np.expand_dims(self.cell_volume, -1)\
             * np.power(self.scale_length / (2 * np.pi), 3)
         factor = 2 * np.pi * np.power(c, 2) * _m / (_e * self.scale_length)
@@ -332,7 +332,7 @@ class CylindricalInitializer(BaseInitializer):
                 raise NotImplementedError()
 
             self.load_particles_pre(self.particles[grid_index], grid_config,
-                                    _e=1.602-19, _m=9.1093837e-31)
+                                    _e=1.602e-19, _m=9.1093837e-31)
 
             out_fp = Path(h5f.filename)
 
