@@ -32,8 +32,9 @@ def get_v_table(nvts=3.3):
     return v_table
 
 
-def _distribute_maxwellian(start, end, vth, velocity, cell_coords,
-                           v_table, dtype_X, dtype_U, _c):
+def _distribute_maxwellian(
+        start, end, thermal_velocity, drifted_velocity, cell_coords,
+        grid_shape, r0, dr, v_table, dtype_X, dtype_U, _c):
     n_particles = end - start + 1
 
     X = np.random.random((n_particles, 3))
@@ -41,9 +42,35 @@ def _distribute_maxwellian(start, end, vth, velocity, cell_coords,
         X = np.clip(X, 0, 1 - np.finfo(dtype_X).eps).astype(dtype_X)
     U = np.empty((n_particles, 3), dtype=dtype_U)
 
+    z, r, phi = [X[..., i] for i in range(3)]
+    ci, cj, ck = cell_coords
+
+    xi = (1 - z, z)
+    eta = ((1 - r) * (2 * r0 + dr * (2 * cj + r + 1)),
+           r * (2 * r0 + dr * (2 * cj + r)))
+    eta_sum = (eta[0] + eta[1])
+    eta = eta[0] / eta_sum, eta[1] / eta_sum
+    zeta = (1 - phi, phi)
+
+    velocity = np.zeros((n_particles, 3), dtype=dtype_U)
+    vth = np.zeros(n_particles, dtype=dtype_U)
+    for i in range(2):
+        _z = xi[i]
+        for j in range(2):
+            _r = eta[j]
+            for k in range(2):
+                _phi = zeta[k]
+                vol = _z * _r * _phi
+
+                _ck = ck + k
+                if _ck == grid_shape[2]:
+                    _ck = 0
+                velocity += vol[:, None] * drifted_velocity[ci+i, cj+j, _ck]
+                vth += vol * thermal_velocity[ci+i, cj+j, _ck]
+
     n_velocity_dist = v_table.shape[0]
     indices = np.random.choice(n_velocity_dist, n_particles)
-    U[:] = (vth * v_table[indices] + velocity) / _c
+    U[:] = (vth[:, None] * v_table[indices] + velocity) / _c
     C_idx = np.full((n_particles, 3), cell_coords)
 
     U2 = (U * U).sum().item() * (_c ** 2)
@@ -74,14 +101,7 @@ class MaxwellianInitializer(BaseInitializer):
 
         thermal_velocity = np.sqrt(np.abs(2 * q * temperature) / m)
 
-        vth_center = np.empty(self.grid_shape, dtype=thermal_velocity.dtype)
-        density_center = np.empty(self.grid_shape, dtype=density.dtype)
-        j_center = np.empty((*self.grid_shape, 3), dtype=current_density.dtype)
         n_particles_in_cell = np.empty(self.grid_shape, dtype=density.dtype)
-
-        node_to_center_3d(thermal_velocity, vth_center, self.coordinate_system)
-        node_to_center_3d(density, density_center, self.coordinate_system)
-        node_to_center_3d(current_density, j_center, self.coordinate_system)
 
         if self.coordinate_system == 'cylindrical':
             cell_volume = self.cell_volume_by_grid * \
@@ -97,21 +117,16 @@ class MaxwellianInitializer(BaseInitializer):
         gilbert_n_particles = np.array([
             n_particles_in_cell[coord] for coord in self.gilbert_curve])
 
-        _density_center = np.expand_dims(density_center, axis=-1)
-        drifted_velocity = np.divide(j_center, q * _density_center,
-                                     out=np.zeros_like(j_center),
-                                     where=_density_center != 0)
-
-        gilbert_vth = np.array([
-            vth_center[coord] for coord in self.gilbert_curve])
-        gilbert_drifted_velocity = np.array([
-            drifted_velocity[coord] for coord in self.gilbert_curve])
+        _density = np.expand_dims(density, axis=-1)
+        drifted_velocity = np.divide(current_density, q * _density,
+                                     out=np.zeros_like(current_density),
+                                     where=_density != 0)
 
         particles.update(dict(
             n_particles=gilbert_n_particles.sum(),
             gilbert_n_particles=gilbert_n_particles,
-            gilbert_vth=gilbert_vth,
-            gilbert_drifted_velocity=gilbert_drifted_velocity
+            thermal_velocity=thermal_velocity,
+            drifted_velocity=drifted_velocity
         ))
 
     def load_particles(self, h5_fp, prefix, dtype_X, dtype_U,
@@ -132,8 +147,8 @@ class MaxwellianInitializer(BaseInitializer):
     def distribute_maxwellian(self, h5_fp, prefix, start_indices, end_indices,
                               gilbert_curve, v_table, particles,
                               dtype_X, dtype_U, _m, _c):
-        vth_list = particles['gilbert_vth']
-        velocity_list = particles['gilbert_drifted_velocity']
+        thermal_velocity = particles['thermal_velocity']
+        drifted_velocity = particles['drifted_velocity']
         m = particles['m'] * _m
         n_computational_to_physical = particles['n_computational_to_physical']
 
@@ -149,12 +164,11 @@ class MaxwellianInitializer(BaseInitializer):
                 end = end_indices[cell_index]
                 if start == end + 1:
                     continue
-                vth = vth_list[cell_index]
-                velocity = velocity_list[cell_index]
 
                 X, U, C_idx, U2 = _distribute_maxwellian(
-                    start, end, vth, velocity, cell_coords, v_table,
-                    dtype_X, dtype_U, _c)
+                    start, end, thermal_velocity, drifted_velocity,
+                    cell_coords, self.grid_shape, self.r0, self.cell_size[1],
+                    v_table, dtype_X, dtype_U, _c)
 
                 if self.save_state:
                     if self.coordinate_system == 'cartesian':

@@ -10,9 +10,10 @@ from ...initializers import (
 
 
 def distribute_and_serialize(
-        start, end, vth, velocity, cell_coords, h5_fp, _prefix, _v_table,
+        start, end, cell_coords, h5_fp, _prefix, _v_table,
         _dtype_X, _dtype_U, grid_vertex_shape, _save_state, _axis_labels,
-        _c, _coordinate_system, _cylindrical_args):
+        _c, _coordinate_system, _cylindrical_args, _thermal_velocity,
+        _drifted_velocity, _grid_shape, _r0, _dr):
     global h5f
     global prefix
     global v_table
@@ -26,6 +27,11 @@ def distribute_and_serialize(
     global c
     global coordinate_system
     global cylindrical_args
+    global thermal_velocity
+    global drifted_velocity
+    global grid_shape
+    global r0
+    global dr
 
     if h5_fp is not None:
         # init
@@ -38,7 +44,11 @@ def distribute_and_serialize(
         c = _c
         coordinate_system = _coordinate_system
         cylindrical_args = _cylindrical_args
-
+        thermal_velocity = _thermal_velocity
+        drifted_velocity = _drifted_velocity
+        grid_shape = _grid_shape
+        r0 = _r0
+        dr = _dr
         if MPI.Comm.Get_parent() == MPI.COMM_NULL:
             # static mode
             h5_comm = MPI.COMM_WORLD.Split(0)
@@ -55,8 +65,8 @@ def distribute_and_serialize(
     is_exist = (start is not None) and (start <= end)
     if is_exist:
         X, U, C_idx, U2 = _distribute_maxwellian(
-            start, end, vth, velocity, cell_coords,
-            v_table, dtype_X, dtype_U, c
+            start, end, thermal_velocity, drifted_velocity, cell_coords,
+            grid_shape, r0, dr, v_table, dtype_X, dtype_U, c
         )
 
         if save_state:
@@ -119,8 +129,8 @@ class MaxwellianInitializer(MPIInitializer, _MaxwellianInitializer):
     def distribute_maxwellian(self, h5_fp, prefix, start_indices, end_indices,
                               gilbert_curve, v_table, particles,
                               dtype_X, dtype_U, _m, _c):
-        vth_list = particles['gilbert_vth']
-        velocity_list = particles['gilbert_drifted_velocity']
+        thermal_velocity = particles['thermal_velocity']
+        drifted_velocity = particles['drifted_velocity']
         m = particles['m'] * _m
         n_computational_to_physical = particles['n_computational_to_physical']
 
@@ -137,8 +147,6 @@ class MaxwellianInitializer(MPIInitializer, _MaxwellianInitializer):
 
             start_indices = list(start_indices) + [None] * n_paddings
             end_indices = list(end_indices) + [None] * n_paddings
-            vth_list = list(vth_list) + [None] * n_paddings
-            velocity_list = list(velocity_list) + [None] * n_paddings
             gilbert_curve = list(gilbert_curve) + [None] * n_paddings
 
         cylindrical_args = None
@@ -146,7 +154,7 @@ class MaxwellianInitializer(MPIInitializer, _MaxwellianInitializer):
             cylindrical_args = (self.cell_size[1], self.r0, self.grid_shape[2])
         U2 = self.executor.map(
             distribute_and_serialize, start_indices, end_indices,
-            vth_list, velocity_list, gilbert_curve,
+            gilbert_curve,
             gen_arg(h5_fp, max_workers),
             gen_arg(prefix, max_workers),
             gen_arg(v_table, max_workers),
@@ -157,7 +165,12 @@ class MaxwellianInitializer(MPIInitializer, _MaxwellianInitializer):
             gen_arg(self.axis_labels, max_workers),
             gen_arg(_c, max_workers),
             gen_arg(self.coordinate_system, max_workers),
-            gen_arg(cylindrical_args, max_workers)
+            gen_arg(cylindrical_args, max_workers),
+            gen_arg(thermal_velocity, max_workers),
+            gen_arg(drifted_velocity, max_workers),
+            gen_arg(self.grid_shape, max_workers),
+            gen_arg(self.r0, max_workers),
+            gen_arg(self.cell_size[1], max_workers),
         )
         if MPI.COMM_WORLD.Get_size() > 1:
             # static mode
