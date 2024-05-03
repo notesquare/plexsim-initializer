@@ -5,6 +5,7 @@ import numpy as np
 from .cartesian import node_to_center_cartesian
 from .cylindrical import node_to_center_cylindrical
 
+
 class SavedFlag(Flag):
     empty = 0x0
     particles = 0x1

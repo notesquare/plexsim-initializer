@@ -7,12 +7,12 @@ from ...initializers import (
     MaxwellianInitializer as _MaxwellianInitializer,
     _distribute_maxwellian
 )
-from ...lib.common import compute_grid_velocity
 
 
-def distribute_and_serialize(start, end, vth, velocity, cell_coords, h5_fp,
-                             _prefix, _v_table, _dtype_X, _dtype_U,
-                             grid_shape, _save_state, _axis_labels):
+def distribute_and_serialize(
+        start, end, vth, velocity, cell_coords, h5_fp, _prefix, _v_table,
+        _dtype_X, _dtype_U, grid_vertex_shape, _save_state, _axis_labels,
+        _c, _coordinate_system, _cylindrical_args):
     global h5f
     global prefix
     global v_table
@@ -23,6 +23,9 @@ def distribute_and_serialize(start, end, vth, velocity, cell_coords, h5_fp,
     global grid_U2
     global save_state
     global axis_labels
+    global c
+    global coordinate_system
+    global cylindrical_args
 
     if h5_fp is not None:
         # init
@@ -32,6 +35,9 @@ def distribute_and_serialize(start, end, vth, velocity, cell_coords, h5_fp,
         dtype_U = _dtype_U
         save_state = _save_state
         axis_labels = _axis_labels
+        c = _c
+        coordinate_system = _coordinate_system
+        cylindrical_args = _cylindrical_args
 
         if MPI.Comm.Get_parent() == MPI.COMM_NULL:
             # static mode
@@ -42,18 +48,28 @@ def distribute_and_serialize(start, end, vth, velocity, cell_coords, h5_fp,
         h5f = h5py.File(h5_fp, 'a', driver='mpio', comm=h5_comm)
 
         if save_state:
-            grid_n = np.zeros(self.grid_vertex_shape, dtype=np.float64)
-            grid_U = np.zeros((*self.grid_vertex_shape, 3), dtype=np.float64)
-            grid_U2 = np.zeros((*self.grid_vertex_shape, 3), dtype=np.float64)
+            grid_n = np.zeros(grid_vertex_shape, dtype=np.float64)
+            grid_U = np.zeros((*grid_vertex_shape, 3), dtype=np.float64)
+            grid_U2 = np.zeros((*grid_vertex_shape, 3), dtype=np.float64)
 
     is_exist = (start is not None) and (start <= end)
     if is_exist:
         X, U, C_idx, U2 = _distribute_maxwellian(
-            start, end, vth, velocity, cell_coords, v_table, dtype_X, dtype_U)
+            start, end, vth, velocity, cell_coords,
+            v_table, dtype_X, dtype_U, c
+        )
 
         if save_state:
-            compute_grid_velocity(
-                X, U, C_idx, grid_n, grid_U, grid_U2)
+            if coordinate_system == 'cartesian':
+                from ...lib.cartesian import compute_grid_velocity
+                compute_grid_velocity(
+                    X, U, C_idx, grid_n, grid_U, grid_U2)
+            elif coordinate_system == 'cylindrical':
+                from ...lib.cylindrical import compute_grid_velocity
+                dr, r0, nphi = cylindrical_args
+                compute_grid_velocity(
+                    X, U, C_idx, grid_n, grid_U, grid_U2,
+                    dr, r0, nphi)
 
         X = np.nextafter(X + C_idx, C_idx)
     else:
@@ -102,16 +118,16 @@ class MaxwellianInitializer(MPIInitializer, _MaxwellianInitializer):
 
     def distribute_maxwellian(self, h5_fp, prefix, start_indices, end_indices,
                               gilbert_curve, v_table, particles,
-                              dtype_X, dtype_U, _m):
+                              dtype_X, dtype_U, _m, _c):
         vth_list = particles['gilbert_vth']
         velocity_list = particles['gilbert_drifted_velocity']
         m = particles['m'] * _m
         n_computational_to_physical = particles['n_computational_to_physical']
 
         if self.save_state:
-            grid_n = np.zeros((self.grid_shape + 1), dtype=np.float64)
-            grid_U = np.zeros((*(self.grid_shape + 1), 3), dtype=np.float64)
-            grid_U2 = np.zeros((*(self.grid_shape + 1), 3), dtype=np.float64)
+            grid_n = np.zeros(self.grid_vertex_shape, dtype=np.float64)
+            grid_U = np.zeros((*self.grid_vertex_shape, 3), dtype=np.float64)
+            grid_U2 = np.zeros((*self.grid_vertex_shape, 3), dtype=np.float64)
 
         max_workers = self.max_workers
         n_tasks = gilbert_curve.shape[0]
@@ -125,6 +141,9 @@ class MaxwellianInitializer(MPIInitializer, _MaxwellianInitializer):
             velocity_list = list(velocity_list) + [None] * n_paddings
             gilbert_curve = list(gilbert_curve) + [None] * n_paddings
 
+        cylindrical_args = None
+        if self.coordinate_system == 'cylindrical':
+            cylindrical_args = (self.cell_size[1], self.r0, self.grid_shape[2])
         U2 = self.executor.map(
             distribute_and_serialize, start_indices, end_indices,
             vth_list, velocity_list, gilbert_curve,
@@ -133,9 +152,12 @@ class MaxwellianInitializer(MPIInitializer, _MaxwellianInitializer):
             gen_arg(v_table, max_workers),
             gen_arg(dtype_X, max_workers),
             gen_arg(dtype_U, max_workers),
-            gen_arg(self.grid_shape, max_workers),
+            gen_arg(self.grid_vertex_shape, max_workers),
             gen_arg(self.save_state, max_workers),
-            gen_arg(self.axis_labels, max_workers)
+            gen_arg(self.axis_labels, max_workers),
+            gen_arg(_c, max_workers),
+            gen_arg(self.coordinate_system, max_workers),
+            gen_arg(cylindrical_args, max_workers)
         )
         if MPI.COMM_WORLD.Get_size() > 1:
             # static mode

@@ -63,7 +63,8 @@ class MaxwellianInitializer(BaseInitializer):
         n_computational_to_physical = int(
                 grid_config['n_computational_to_physical'])
 
-        temperature = self.load_field_array(temperature, self.grid_vertex_shape)
+        temperature = self.load_field_array(
+            temperature, self.grid_vertex_shape)
         density = self.load_field_array(density, self.grid_vertex_shape)
 
         if current_density is None:
