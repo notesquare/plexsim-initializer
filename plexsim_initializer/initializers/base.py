@@ -107,6 +107,11 @@ class BaseInitializer:
                 self.load_relative_npy_file(constant_induced_field_center)
         self.constant_induced_field_center = constant_induced_field_center
 
+        vacuum_cell_mask = _environment_config.get('vacuum_cell_mask')
+        if vacuum_cell_mask is not None:
+            vacuum_cell_mask = self.load_relative_npy_file(vacuum_cell_mask)
+        self.vacuum_cell_mask = vacuum_cell_mask
+
         self.create_dataset_kwargs = dict(
             chunks=True, shuffle=True, compression='gzip'
         )
@@ -260,6 +265,10 @@ class BaseInitializer:
                 dtype=np.int16
             )
 
+        if self.vacuum_cell_mask is not None:
+            settings.create_dataset(
+                'vacuum_cell_mask', data=np.array(self.vacuum_cell_mask))
+
     def base_path(self, h5f, iteration):
         return np.string_(h5f.attrs['basePath']).replace(
             b'%T', np.string_(str(iteration)))
@@ -344,6 +353,10 @@ class BaseInitializer:
         if self.constant_induced_field_center is not None:
             self.B_induced[tuple(
                 axis for axis in self.constant_induced_field_center.T)] = 0
+
+        settings = h5f.require_group('settings')
+        settings.create_dataset(
+            'B_fixed', data=np.array(self.B_external + self.B_induced))
 
         self.E_external = self.load_field_array(
             self.environment_config.get('external_electric_field'),
