@@ -35,8 +35,9 @@ $ MPIHOME=[MPIHOME] PLEXSIM_BIN=[PLEXSIM_BIN] MPI_OPTIONS=[MPI_OPTIONS]\
 
 e.g. `proj.0.h5`
 
-- PLEXsim Initializer를 통해 만들어지는 파일입니다.
-- 전체 입자 정보(`/data/{cycle}/particles/{particle_name}`) 및 field 정보 (`/data/{cycle}/fields/(B, E)`)를 반드시 포함하고 있어야 합니다.
+- [PLEXsim Initializer](https://github.com/notesquare/plexsim-initializer)를 통해 만들어지는 파일입니다.
+- 시뮬레이션을 이어서 하는 경우 PLEXsim Solver를 통해서 만들어지는 파일도 사용할 수 있습니다.
+  - 이 경우 전체 입자 정보(`/data/{cycle}/particles/{particle_name}`) 및 field 정보 (`/data/{cycle}/fields/[B, E]`)를 반드시 포함하고 있어야 합니다.
 
 
 ### 2. Config File
@@ -56,18 +57,24 @@ grids:
     max_n_particles_per_subgrid: 3.e+8
     
 simulation:
-  delta_time: 1.e-10
+  solver: explicit
+  delta_time: 1.e-2
   n_cycles: 200
   theta: 0.5
+  field_smoothing: 2
+  field_damping_factor: 0.8
   dynamic_balancing_frequency: 100
   backend: mpi
   use_shared_memory: No
+  loading_strategy:
+    chunk_size: 1.e+6
   checkpoint_strategy:
     save_particles_frequency: 20
     save_field_frequency: 1
     save_tracked_frequency: 1
     save_state_frequency: -1
     chunk_size: 1.e+6
+  check_stats_frequency: 0
   gmres:
     rtol: 0
     atol: 1.e-6
@@ -85,17 +92,36 @@ simulation:
 #### simulation
 시뮬레이션에 관련 설정입니다. `_frequency`가 붙은 항목의 경우 `0`이나 `-1`로 설정하면 옵션을 끌 수 있습니다.
 
+- **solver**: _{'explicit', 'implicit'}_
+  - `cartesian`: `implicit` method만을 지원
+  - `cylindrical`: `implicit` 및 `explicit` method 지원
 - **delta_time**: _float_
-  - 각 cycle의 시간 간격(s)을 지정합니다.
+  - 각 cycle의 시간 간격을 지정합니다.
+  - `cartesian`: [s]
+  - `cylindrical`: `delta_time[s] = (scale_length / (2 * pi * c)) * delta_time`
 - **n_cycles**: _int_
   - 시뮬레이션 cycle 수를 지정합니다.
 - **theta**: _float, optional_
+  - `cartesian` only
   - 시뮬레이션의 theta-scheme을 지정합니다. 입력하지 않을 경우 0.5로 설정됩니다.
+- **field_smoothing**: _{0, 1, 2}, optional_
+  - `cylindrical` only
+  - _0_: smoothing off
+  - _1_: r, z축 경계면을 포함하여 smoothing
+  - _2_: r, z축 경계면 안쪽의 값만 smoothing
+- **field_damping_factor**: _float, optional_
+  - `cylindrical-explicit` only
+  - LCFS 바깥쪽 field(B, E)를 lambda-damping. PLEXsim Initializer에서 `vacuum_cell_mask` 옵션을 준 경우에만 적용됨.
+  - `E[vacuum_cell_mask] *= damping_factor`
+  - `B[vacuum_cell_mask] = damping_factor * B[vacuum_cell_mask] + (1 - damping_factor) * B_fixed[vacuum_cell_mask]` (`B_fixed`는 Cycle 0에서의 total B)
 - **dynamic_balancing_frequency**: _int_
   - 몇 cycle마다 dynamic balancing을 할지 설정합니다. 각 SubGrid에 입자들이 불균등하게 분포하는 경우 속도와 메모리 최적화를 위해 설정할 수 있습니다.
 - **backend**: _{'mpi, local'}_
   - _'mpi'_: PLEXsim Distributed를 실행합니다. 다중 노드 및 다중 GPU를 사용할 수 있습니다.
   - _'local'_: PLEXsim Core를 실행합니다. 단일 노드, 단일 GPU를 사용할 수 있습니다.
+- **loading_strategy**
+  - **chunk_size**: _int, optional_
+    - particle loading시 한 번에 읽어올 chunk의 크기 지정
 - **checkpoint_strategy**
   - 저장 옵션을 지정합니다.
   - **save_particles_frequency**: _int_
@@ -110,7 +136,10 @@ simulation:
   - **save_state_frequency**: _int_
     - 각 grid에 대한 격자점의 temperature(`T`)[eV], density(`n`)[m^-3^], avg_velocity(`U`)[m/s]를 몇 cycle마다 저장할지 설정합니다.
     - 결과 파일의 `/data/{cycle}/fields/{particle_name}_(n, U, T)`에 저장됩니다.
+- **check_stats_frequency**: _int, optional_
+  - stats(n_particles, field 및 kinetic energy)를 몇 cycle마다 계산할지 설정합니다. 입력하지 않을 경우 1로 설정되며, 파일 저장을 하는 cycle에서는 항상 계산합니다.
 - **gmres**
+  - `implicit` method only (`cartesian`, `cylindrical`)
   - field solver의 [GMRES](https://docs.scipy.org/doc/scipy/reference/generated/scipy.sparse.linalg.lgmres.html) 관련 parameter를 설정합니다.
   - **rtol, atol**: _float, optional_
     - gmres의 tolerance를 설정합니다. `norm(residual) <= max(rtol*norm(b), atol)` 을 만족하는 해를 찾습니다. 입력하지 않으면 `rtol=0`, `atol=1e-6`으로 설정됩니다.
@@ -132,7 +161,7 @@ e.g. `proj.h5`
     /fields
       /B  # magnetic field
       /E  # electric field
-      electron_T  # temperature[eV] of electron on node points
+      /electron_T  # temperature[eV] of electron on node points
       electron_n  # density[m^-3] of electron on node points
       /electron_U  # avg velocity[m/s] of electron on node points
     /particles
@@ -152,8 +181,22 @@ e.g. `proj.h5`
 /settings
 ```
 
+### Unit
+- `cartesian`: SI unit
+- `cylindrical`
+  - SI unit: , `data/0/fields/[J_vacuum, {particle}_T, {particle}_U, {particle}_n`, `data/0/stats`
+  - Normalized unit: `data/0/fields/[B, E, {particle}_J]`, `data/0/particles/{particle}/[momentum, position]`
+    - position: `[0, grid_shape[i])` 사이의 값으로 normalized
+    - momentum: `U[m/s] = U * c` (array의 값은 momentum이 아닌 velocity임에 주의)
+    - fields: config에서 정의된 바와 같이 normalized
 
-## GPU 메모리 테스트
+### 그 외 유의사항
+- [mpi](#simulation) backend를 선택하여 Initializer를 실행할 경우 `/data/0/particles/{particle}/[momentum, position]`의 array는 가장 마지막 element를 NaN 값으로 채우고 있습니다.
+  - e.g. 입자 수가 1000일 경우 1001의 크기를 갖는 배열이 만들어지며 index [0, 999]까지만 값이 채워집니다.
+- PLEXsim Solver를 `cylindrical-explicit`으로 실행할 경우 입자 속도가 Lorentz transform되어 저장됩니다. 이는 `data/{cycle}/particles/{particle}/momentum`의 `_is_Lorentz_transformed` attribute 값이 1인 걸로 확인하실 수 있으며 없거나 0인 경우 로렌츠 변환되지 않은 것입니다.
+
+
+## ~~GPU 메모리 테스트~~ (Not implemented in v1.3.0)
 
 시뮬레이션 가능한 최대 입자 수를 계산하기 위한 메모리 테스트 기능입니다. MPI 환경에서 사용 가능하며 다중 노드, 다중 GPU를 지원합니다. PLEXsim Initializer를 실행하기 전 대략적인 capacity를 계산할 수 있습니다.
 
