@@ -600,7 +600,7 @@ class BaseInitializer:
         if n_particles > self.chunk_size * 2:
             _create_dataset_kwargs['chunks'] = (self.chunk_size,)
         h5_group.create_dataset('weighting', (n_particles,),
-                                dtype=np.float32,
+                                dtype=np.uint64,
                                 **_create_dataset_kwargs)
         h5_group['weighting'][:] = n_computational_to_physical
         self.write_settings(h5_group['weighting'], weighting_attrs)
@@ -655,7 +655,7 @@ class BaseInitializer:
         if n_track_particles > self.chunk_size * 2:
             _create_dataset_kwargs['chunks'] = (self.chunk_size,)
         tracked_group.create_dataset(
-            'weighting', (n_track_particles,), dtype=np.float32,
+            'weighting', (n_track_particles,), dtype=np.uint64,
             **_create_dataset_kwargs)
         tracked_group['weighting'][:] = n_computational_to_physical
         self.write_settings(tracked_group['weighting'],
