@@ -562,10 +562,15 @@ class BaseInitializer:
             _startIndices=start_indices,
             _endIndices=end_indices,
             _startParticleIndices=start_p_indices,
-            _endParticleIndices=end_p_indices
+            _endParticleIndices=end_p_indices,
+            _is_cell_sorted=True
         )
 
         self.write_settings(h5_group, grid_attrs)
+
+        h5_group.create_dataset('_gilbert_n_particles',
+                                data=gilbert_n_particles,
+                                dtype=np.uint64)
 
         patches = h5_group.require_group('particlePatches')
         patches.create_dataset('numParticles',
