@@ -611,10 +611,9 @@ class BaseInitializer:
         self.write_settings(h5_group['weighting'], weighting_attrs)
 
         # create dataset with size (n + 1,) for MPI collective serialization
-        _create_dataset_kwargs = {}
+        _create_dataset_kwargs = self.create_dataset_kwargs.copy()
         avg_n_particles = n_particles / len(self.gilbert_curve)
         if avg_n_particles > self.chunk_size * 2:
-            _create_dataset_kwargs = self.create_dataset_kwargs.copy()
             _create_dataset_kwargs['chunks'] = (self.chunk_size,)
         for i, axis in enumerate(self.axis_labels):
             # X
