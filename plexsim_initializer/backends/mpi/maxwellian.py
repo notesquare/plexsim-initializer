@@ -1,4 +1,4 @@
-import h5py
+import zarr
 import numpy as np
 from mpi4py import MPI
 
@@ -10,10 +10,10 @@ from ...initializers import (
 
 
 def distribute_and_serialize(
-        start, end, vth, velocity, cell_coords, h5_fp, _prefix, _v_table,
+        start, end, vth, velocity, cell_coords, zarr_fp, _prefix, _v_table,
         _dtype_X, _dtype_U, grid_vertex_shape, _save_state, _axis_labels,
         _c, _coordinate_system, _cylindrical_args):
-    global h5f
+    global zarr_store
     global prefix
     global v_table
     global dtype_X
@@ -27,7 +27,7 @@ def distribute_and_serialize(
     global coordinate_system
     global cylindrical_args
 
-    if h5_fp is not None:
+    if zarr_fp is not None:
         # init
         prefix = _prefix
         v_table = _v_table
@@ -39,13 +39,7 @@ def distribute_and_serialize(
         coordinate_system = _coordinate_system
         cylindrical_args = _cylindrical_args
 
-        if MPI.Comm.Get_parent() == MPI.COMM_NULL:
-            # static mode
-            h5_comm = MPI.COMM_WORLD.Split(0)
-        else:
-            # dynamic mode
-            h5_comm = MPI.COMM_WORLD
-        h5f = h5py.File(h5_fp, 'a', driver='mpio', comm=h5_comm)
+        zarr_store = zarr.open(zarr_fp, mode='a')
 
         if save_state:
             grid_n = np.zeros(grid_vertex_shape, dtype=np.float64)
@@ -71,40 +65,33 @@ def distribute_and_serialize(
                     X, U, C_idx, grid_n, grid_U, grid_U2,
                     dr, r0, nphi)
 
-        X = np.nextafter(X + C_idx, C_idx)
+        X = np.nextafter(X, 0)
     else:
         U2 = 0
 
+    coord_name = '_'.join(str(x) for x in cell_coords)
     for i, axis in enumerate(axis_labels):
         # X
-        _path = f'{prefix}/position/{axis}'
-        X_i = h5f[_path]
-        with X_i.collective:
-            if is_exist:
-                X_i[start:end+1] = X[:, i]
-            else:
-                X_i[-1:] = None
+        _path = f'{prefix}/position/{coord_name}/{axis}'
+        X_i = zarr_store[_path]
+        if is_exist:
+            X_i[:] = X[:, i]
 
         # U
-        _path = f'{prefix}/momentum/{axis}'
-        U_i = h5f[_path]
-        with U_i.collective:
-            if is_exist:
-                U_i[start:end+1] = U[:, i]
-            else:
-                U_i[-1:] = None
+        _path = f'{prefix}/momentum/{coord_name}/{axis}'
+        U_i = zarr_store[_path]
+        if is_exist:
+            U_i[:] = U[:, i]
 
     return U2
 
 
 def pool_finalize(*args):
-    global h5f
+    global zarr_store
     global grid_n
     global grid_U
     global grid_U2
     global save_state
-
-    h5f.close()
 
     if save_state:
         return grid_n, grid_U, grid_U2
@@ -116,7 +103,7 @@ class MaxwellianInitializer(MPIInitializer, _MaxwellianInitializer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-    def distribute_maxwellian(self, h5_fp, prefix, start_indices, end_indices,
+    def distribute_maxwellian(self, zarr_fp, prefix, start_indices, end_indices,
                               gilbert_curve, v_table, particles,
                               dtype_X, dtype_U, _m, _c):
         vth_list = particles['gilbert_vth']
@@ -147,7 +134,7 @@ class MaxwellianInitializer(MPIInitializer, _MaxwellianInitializer):
         U2 = self.executor.map(
             distribute_and_serialize, start_indices, end_indices,
             vth_list, velocity_list, gilbert_curve,
-            gen_arg(h5_fp, max_workers),
+            gen_arg(zarr_fp, max_workers),
             gen_arg(prefix, max_workers),
             gen_arg(v_table, max_workers),
             gen_arg(dtype_X, max_workers),
@@ -179,11 +166,3 @@ class MaxwellianInitializer(MPIInitializer, _MaxwellianInitializer):
                 grid_U=grid_U,
                 grid_U2=grid_U2
             ))
-
-        with h5py.File(h5_fp, 'a') as h5f:
-            for i, axis in enumerate(self.axis_labels):
-                _path = f'{prefix}/position/{axis}'
-                h5f[_path][particles['n_particles']:] = None
-
-                _path = f'{prefix}/momentum/{axis}'
-                h5f[_path][particles['n_particles']:] = None

@@ -1,6 +1,6 @@
 from numba import njit
 import numpy as np
-import h5py
+import zarr
 
 from .base import BaseInitializer
 
@@ -69,7 +69,7 @@ class RandomInitializer(BaseInitializer):
             avg_velocity=avg_velocity
         ))
 
-    def load_particles(self, h5_fp, prefix, dtype_X, dtype_U,
+    def load_particles(self, zarr_fp, prefix, dtype_X, dtype_U,
                        particles, _m, _c):
         gilbert_n_particles = particles['gilbert_n_particles']
 
@@ -79,12 +79,12 @@ class RandomInitializer(BaseInitializer):
         start_indices[1:] = end_indices[:-1] + 1
 
         self.distribute_random(
-            h5_fp, prefix, start_indices, end_indices,
+            zarr_fp, prefix, start_indices, end_indices,
             np.array(self.gilbert_curve, dtype=np.int16),
             particles, dtype_X, dtype_U, _m, _c
         )
 
-    def distribute_random(self, h5_fp, prefix, start_indices, end_indices,
+    def distribute_random(self, zarr_fp, prefix, start_indices, end_indices,
                           gilbert_curve, particles, dtype_X, dtype_U, _m, _c):
         avg_velocity = particles['avg_velocity']
         m = particles['m'] * _m
@@ -95,51 +95,45 @@ class RandomInitializer(BaseInitializer):
             grid_U = np.zeros((*self.grid_vertex_shape, 3), dtype=np.float64)
             grid_U2 = np.zeros((*self.grid_vertex_shape, 3), dtype=np.float64)
 
-        with h5py.File(h5_fp, 'a') as h5f:
-            kinetic_E = 0
-            for cell_index, cell_coords in enumerate(gilbert_curve):
-                start = start_indices[cell_index]
-                end = end_indices[cell_index]
-                if start == end + 1:
-                    continue
+        kinetic_E = 0
+        zarr_group = zarr.open(zarr_fp, 'a')
+        for cell_index, cell_coords in enumerate(gilbert_curve):
+            start = start_indices[cell_index]
+            end = end_indices[cell_index]
+            if start == end + 1:
+                continue
 
-                X, U, C_idx, U2 = _distribute_random(
-                    start, end, avg_velocity, cell_coords, dtype_X, dtype_U, _c
-                )
+            X, U, C_idx, U2 = _distribute_random(
+                start, end, avg_velocity, cell_coords, dtype_X, dtype_U, _c
+            )
 
-                if self.save_state:
-                    if self.coordinate_system == 'cartesian':
-                        from ..lib.cartesian import compute_grid_velocity
-                        compute_grid_velocity(
-                            X, U, C_idx, grid_n, grid_U, grid_U2)
-                    elif self.coordinate_system == 'cylindrical':
-                        from ..lib.cylindrical import compute_grid_velocity
-                        compute_grid_velocity(
-                            X, U, C_idx, grid_n, grid_U, grid_U2,
-                            self.cell_size[1], self.r0, self.grid_shape[2])
-                # serialize
-                X = np.nextafter(X + C_idx, C_idx)
-                for i, axis in enumerate(self.axis_labels):
-                    # X
-                    _path = f'{prefix}/position/{axis}'
-                    h5f[_path][start:end+1] = X[:, i]
-
-                    # U
-                    _path = f'{prefix}/momentum/{axis}'
-                    h5f[_path][start:end+1] = U[:, i]
-
-                kinetic_E += 0.5 * m * U2 * n_computational_to_physical
-            particles['kinetic_E'] = kinetic_E
             if self.save_state:
-                particles.update(dict(
-                    grid_n=grid_n,
-                    grid_U=grid_U,
-                    grid_U2=grid_U2
-                ))
-
+                if self.coordinate_system == 'cartesian':
+                    from ..lib.cartesian import compute_grid_velocity
+                    compute_grid_velocity(
+                        X, U, C_idx, grid_n, grid_U, grid_U2)
+                elif self.coordinate_system == 'cylindrical':
+                    from ..lib.cylindrical import compute_grid_velocity
+                    compute_grid_velocity(
+                        X, U, C_idx, grid_n, grid_U, grid_U2,
+                        self.cell_size[1], self.r0, self.grid_shape[2])
+            # serialize
+            coord_name = '_'.join(str(x) for x in cell_coords)
+            X = np.nextafter(X, 0)
             for i, axis in enumerate(self.axis_labels):
-                _path = f'{prefix}/position/{axis}'
-                h5f[_path][end+1:] = None
+                # X
+                _path = f'{prefix}/position/{coord_name}/{axis}'
+                zarr_group[_path][:] = X[:, i]
 
-                _path = f'{prefix}/momentum/{axis}'
-                h5f[_path][end+1:] = None
+                # U
+                _path = f'{prefix}/momentum/{coord_name}/{axis}'
+                zarr_group[_path][:] = U[:, i]
+
+            kinetic_E += 0.5 * m * U2 * n_computational_to_physical
+        particles['kinetic_E'] = kinetic_E
+        if self.save_state:
+            particles.update(dict(
+                grid_n=grid_n,
+                grid_U=grid_U,
+                grid_U2=grid_U2
+            ))

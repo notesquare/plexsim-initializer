@@ -1,7 +1,7 @@
 from pathlib import Path
 
 import numpy as np
-import h5py
+import zarr
 
 from ..lib.common import (
     node_to_center_3d,
@@ -38,8 +38,8 @@ class CylindricalInitializer(BaseInitializer):
     @property
     def env_attrs(self):
         return dict(
-            grid_shape=self.grid_shape,
-            cell_size=self.cell_size,
+            grid_shape=self.grid_shape.tolist(),
+            cell_size=self.cell_size.tolist(),
             permittivity=self.permittivity,
             permeability=self.permeability,
             scale_length=self.scale_length,
@@ -99,50 +99,47 @@ class CylindricalInitializer(BaseInitializer):
     @property
     def B_attrs(self):
         return dict(
-            geometry=np.string_(self.coordinate_system),
-            gridSpacing=self.cell_size,
-            gridGlobalOffset=self.grid_global_offset,
-            gridUnitSI=np.float64(1),
-            dataOrder=np.string_('C'),
-            axisLabels=np.array(self.axis_labels).astype(np.string_),
-            unitDimension=np.array(
-                [0, 1, -2, -1, 0, 0, 0], dtype=np.float64),
-            fieldSmoothing=np.string_('none'),
+            geometry=self.coordinate_system,
+            gridSpacing=self.cell_size.tolist(),
+            gridGlobalOffset=self.grid_global_offset.tolist(),
+            gridUnitSI=1.,
+            dataOrder='C',
+            axisLabels=self.axis_labels,
+            unitDimension=[0, 1, -2, -1, 0, 0, 0],
+            fieldSmoothing='none',
             timeOffset=0.
         )
 
     @property
     def E_attrs(self):
         return dict(
-            geometry=np.string_(self.coordinate_system),
-            gridSpacing=self.cell_size,
-            gridGlobalOffset=self.grid_global_offset,
-            gridUnitSI=np.float64(1),
-            dataOrder=np.string_('C'),
-            axisLabels=np.array(self.axis_labels).astype(np.string_),
-            unitDimension=np.array(
-                [1, 1, -3, -1, 0, 0, 0], dtype=np.float64),
-            fieldSmoothing=np.string_('none'),
+            geometry=self.coordinate_system,
+            gridSpacing=self.cell_size.tolist(),
+            gridGlobalOffset=self.grid_global_offset.tolist(),
+            gridUnitSI=1.,
+            dataOrder='C',
+            axisLabels=self.axis_labels,
+            unitDimension=[1, 1, -3, -1, 0, 0, 0],
+            fieldSmoothing='none',
             timeOffset=0.
         )
 
     @property
     def J_attrs(self):
         return dict(
-            geometry=np.string_(self.coordinate_system),
-            gridSpacing=self.cell_size,
-            gridGlobalOffset=self.grid_global_offset,
-            gridUnitSI=np.float64(1),
-            dataOrder=np.string_('C'),
-            axisLabels=np.array(self.axis_labels).astype(np.string_),
-            unitDimension=np.array(
-                [-2, 0, 0, 1, 0, 0, 0], dtype=np.float64),
-            fieldSmoothing=np.string_('none'),
+            geometry=self.coordinate_system,
+            gridSpacing=self.cell_size.tolist(),
+            gridGlobalOffset=self.grid_global_offset.tolist(),
+            gridUnitSI=1.,
+            dataOrder='C',
+            axisLabels=self.axis_labels,
+            unitDimension=[-2, 0, 0, 1, 0, 0, 0],
+            fieldSmoothing='none',
             timeOffset=0.
         )
 
     def write_J(self, fields_group, _e=1.602e-19, c=2.99792458e8):
-        J_group = fields_group.require_group(np.string_('J_vacuum'))
+        J_group = fields_group.require_group('J_vacuum')
 
         J_attrs = self.J_attrs
         self.write_settings(J_group, J_attrs)
@@ -153,36 +150,34 @@ class CylindricalInitializer(BaseInitializer):
         fJ = 2.224e-13 / self.scale_length
         J_vac = self.J_vac * J_norm * fJ
 
-        axis_labels = [np.string_(v) for v in self.axis_labels]
         dimension = len(self.grid_shape)
-        for i, axis in enumerate(axis_labels):
+        for i, axis in enumerate(self.axis_labels):
             J_group.create_dataset(axis, data=J_vac[..., i],
                                    **self.create_dataset_kwargs)
             J_group[axis].attrs['position'] = np.zeros(
-                dimension, dtype=J_vac.dtype)
-            J_group[axis].attrs['unitSI'] = np.float64(1)
+                dimension, dtype=J_vac.dtype).tolist()
+            J_group[axis].attrs['unitSI'] = 1.
 
     def position_offset_attrs(self, n_particles):
         return dict(
             macroWeighted=np.uint32(1),
             weightingPower=0.,
             timeOffset=0.,
-            unitDimension=np.array([1, 0, 0, 0, 0, 0, 0], dtype=np.float64),
+            unitDimension=[1, 0, 0, 0, 0, 0, 0],
             **{axis: dict(
                 value=np.float32(0)+self.r0 if axis == 'r' else np.float32(0),
-                shape=np.array([n_particles], dtype=np.uint64),
+                shape=[n_particles],
                 unitSI=np.float64(1)
             ) for axis in self.axis_labels}
         )
 
     def write_particle_patches_offset(self, patches_group, n_splits):
         offset = patches_group.require_group('offset')
-        offset.attrs['unitDimension'] = np.array(
-            [1, 0, 0, 0, 0, 0, 0], dtype=np.float64)
+        offset.attrs['unitDimension'] = [1, 0, 0, 0, 0, 0, 0]
         for i, axis in enumerate(self.axis_labels):
             v = self.r0 if axis == 'r' else 0.
             offset.create_dataset(axis, data=np.full(n_splits, v))
-            offset[axis].attrs['unitSI'] = np.float64(self.cell_size[i])
+            offset[axis].attrs['unitSI'] = self.cell_size[i]
 
     def yee_to_grid_B(self, B):
         f = np.swapaxes(B, 0, 2).flatten()
@@ -287,7 +282,7 @@ class CylindricalInitializer(BaseInitializer):
 
         return electric_E, induced_electric_E
 
-    def setup_particles(self, h5f, iteration=0):
+    def setup_particles(self, zarr_group, iteration=0):
         flag = SavedFlag.particles
 
         tracking_start_id = 1
@@ -334,68 +329,57 @@ class CylindricalInitializer(BaseInitializer):
             self.load_particles_pre(self.particles[grid_index], grid_config,
                                     _e=1.602e-19, _m=9.1093837e-31)
 
-            out_fp = Path(h5f.filename)
-
             # serialize particles
-            grid_fp = out_fp.with_suffix(f'.g{grid_index}.h5')
             particle_name = grid_config['name']
 
             p_path = f'data/{iteration}/particles/{particle_name}'
-            with h5py.File(grid_fp, 'w') as grid_h5f:
-                particle_group = grid_h5f.require_group(p_path)
-                # custom attribute
-                particle_group.attrs['_gridIndex'] = grid_index
-                particle_group.attrs['_tracked'] = 0
+            particle_group = zarr_group.require_group(p_path)
+            # custom attribute
+            particle_group.attrs['_gridIndex'] = grid_index
+            particle_group.attrs['_tracked'] = 0
 
-                particle_data = self.particles[grid_index]
-                self.write_particle_attrs(
-                    particle_group, particle_data, n_splits,
-                    n_computational_to_physical, dtype_X, dtype_U)
+            particle_data = self.particles[grid_index]
+            self.write_particle_attrs(
+                particle_group, particle_data, n_splits,
+                n_computational_to_physical, dtype_X, dtype_U)
 
+            zarr_fp = zarr_group.store.path
             self.load_particles(
-                grid_fp, p_path, dtype_X, dtype_U, self.particles[grid_index],
+                zarr_fp, p_path, dtype_X, dtype_U, self.particles[grid_index],
                 _m=9.1093837e-31, _c=2.99792458e8)
 
-            with h5py.File(grid_fp, 'a') as grid_h5f:
-                # create external link in
-                h5f[p_path] = h5py.ExternalLink(grid_fp.name, p_path)
+            # serialize tracking particles
+            n_track_particles = initial_condition.get('tracking', {}) \
+                .get('n_particles', 0)
+            n_particles = particle_data['n_particles']
 
-                # serialize tracking particles
-                n_track_particles = initial_condition.get('tracking', {}) \
-                    .get('n_particles', 0)
-                n_particles = particle_data['n_particles']
+            if n_track_particles > n_particles:
+                print('Warning: number of tracking particles cannot be'
+                      ' greater than number of particles.')
+                n_track_particles = n_particles
 
-                if n_track_particles > n_particles:
-                    print('Warning: number of tracking particles cannot be'
-                          ' greater than number of particles.')
-                    n_track_particles = n_particles
+            if n_track_particles > 0:
+                tracked_path = f'{p_path}_tracked'
+                tracked_group = zarr_group.require_group(tracked_path)
 
-                if n_track_particles > 0:
-                    tracked_path = f'{p_path}_tracked'
-                    tracked_group = grid_h5f.require_group(tracked_path)
+                particle_group = zarr_group.require_group(p_path)
+                self.serialize_tracked(
+                    tracked_group, grid_index, n_track_particles, q, m,
+                    n_computational_to_physical, n_particles,
+                    tracking_start_id, particle_group, particle_data
+                )
 
-                    particle_group = grid_h5f.require_group(p_path)
-                    self.serialize_tracked(
-                        tracked_group, grid_index, n_track_particles, q, m,
-                        n_computational_to_physical, n_particles,
-                        tracking_start_id, particle_group
-                    )
+                tracking_start_id += n_track_particles
 
-                    # create external link in
-                    h5f[tracked_path] = h5py.ExternalLink(grid_fp.name,
-                                                          tracked_path)
-
-                    tracking_start_id += n_track_particles
-
-                    flag |= SavedFlag.tracked
+                flag |= SavedFlag.tracked
 
         return flag
 
-    def setup_state(self, h5f, iteration=0, density_threshold=1e-10,
+    def setup_state(self, zarr_group, iteration=0, density_threshold=1e-10,
                     _e=1.602e-19, _m=9.1093837e-31, c=2.99792458e8):
-        fields_path = self.base_path(h5f, iteration) \
-            + np.string_(h5f.attrs['meshesPath'])
-        fields_group = h5f.require_group(fields_path)
+        fields_path = self.base_path(zarr_group, iteration) \
+            + zarr_group.attrs['meshesPath']
+        fields_group = zarr_group.require_group(fields_path)
 
         for grid_index, grid_values in self.particles.items():
             q = grid_values['q'] * _e

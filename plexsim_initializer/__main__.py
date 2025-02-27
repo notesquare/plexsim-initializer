@@ -34,8 +34,8 @@ if __name__ == '__main__':
         sys.exit(1)
 
     # make sure out_file's extension is h5 (lowercase).
-    if not out_fp.name.lower().endswith('.h5'):
-        out_fp = out_fp.parent / (out_fp.name + '.h5')
-    out_fp = out_fp.with_suffix('.h5')
+    if not out_fp.name.lower().endswith('.zarr'):
+        out_fp = out_fp.parent / (out_fp.name + '.zarr')
+    out_fp = out_fp.with_suffix('.zarr')
 
     initialize(input_fp, out_fp, author=args.author)

@@ -2,7 +2,9 @@ from pathlib import Path
 from datetime import datetime
 
 import yaml
-import h5py
+import zarr
+import kvikio
+import kvikio.zarr
 import numpy as np
 import numpy.ma as ma
 
@@ -113,7 +115,7 @@ class BaseInitializer:
         self.vacuum_cell_mask = vacuum_cell_mask
 
         self.create_dataset_kwargs = dict(
-            chunks=True, shuffle=True, compression='gzip'
+            chunks=True, compressor=kvikio.zarr.CompatCompressor.lz4().cpu
         )
 
         self.particles = dict()
@@ -157,28 +159,29 @@ class BaseInitializer:
         else:
             raise ValueError(self.iteration_encoding)
 
-        with h5py.File(init_out_fp, 'w') as h5f:
-            flag = SavedFlag.empty
+        zf = zarr.open(init_out_fp, 'w')
 
-            self.setup_root_attr(h5f, iteration_encoding, iteration_format,
-                                 author=author)
-            t and t.update()
-            self.setup_base_path(h5f, iteration=iteration)
-            t and t.update()
-            flag |= self.setup_fields(h5f, iteration=iteration)
-            t and t.update()
-            flag |= self.setup_particles(h5f, iteration=iteration)
-            t and t.update()
-            flag |= self.setup_stats(h5f, iteration=iteration)
-            t and t.update()
-            if self.save_state:
-                flag |= self.setup_state(h5f, iteration=iteration)
-            t and t.update()
+        flag = SavedFlag.empty
 
-            if self.iteration_encoding == 'file':
-                h5f.attrs['_saved'] = flag.value
-            else:
-                h5f[f'data/{iteration}'].attrs['_saved'] = flag.value
+        self.setup_root_attr(zf, iteration_encoding, iteration_format,
+                             author=author)
+        t and t.update()
+        self.setup_base_path(zf, iteration=iteration)
+        t and t.update()
+        flag |= self.setup_fields(zf, iteration=iteration)
+        t and t.update()
+        flag |= self.setup_particles(zf, iteration=iteration)
+        t and t.update()
+        flag |= self.setup_stats(zf, iteration=iteration)
+        t and t.update()
+        if self.save_state:
+            flag |= self.setup_state(zf, iteration=iteration)
+        t and t.update()
+
+        if self.iteration_encoding == 'file':
+            zf.attrs['_saved'] = flag.value
+        else:
+            zf[f'data/{iteration}'].attrs['_saved'] = flag.value
 
         if create_pmd_file:
             _out_fp = remove_cycle_pattern_from_filename(out_fp)
@@ -194,44 +197,46 @@ class BaseInitializer:
             species = data['species']
             print(f" {grid_index} ({species}) : {data['n_particles']:,}")
 
-    def write_settings(self, h5_group, settings):
+    def write_settings(self, zarr_group, settings):
         for k, v in settings.items():
             if isinstance(v, dict):
-                sub_group = h5_group.require_group(k)
+                sub_group = zarr_group.require_group(k)
                 self.write_settings(sub_group, v)
             elif isinstance(v, list) and len(v) > 0 and isinstance(v[0], dict):
                 for i, _v in enumerate(v):
-                    sub_group = h5_group.require_group(k)
+                    sub_group = zarr_group.require_group(k)
                     sub_group = sub_group.require_group(f'{i}')
                     self.write_settings(sub_group, _v)
             else:
-                h5_group.attrs[k] = v
+                if isinstance(v, np.ndarray):
+                    v = v.tolist()
+                zarr_group.attrs[k] = v
 
     @property
     def env_attrs(self):
         raise NotImplementedError()
 
-    def setup_root_attr(self, h5f, iteration_encoding, iteration_format,
+    def setup_root_attr(self, zarr_group, iteration_encoding, iteration_format,
                         author='nobody'):
         current_dt = datetime.now().astimezone()
         root_attrs = dict(
-            basePath=np.string_('/data/%T/'),
-            author=np.string_(author),
-            date=np.string_(current_dt.strftime('%Y-%m-%d %H:%M:%S %z')),
-            iterationEncoding=np.string_(iteration_encoding),
-            iterationFormat=np.string_(iteration_format),
-            meshesPath=np.string_('fields/'),
-            particlesPath=np.string_('particles/'),
-            openPMD=np.string_('1.1.0'),
+            basePath='/data/%T/',
+            author=author,
+            date=current_dt.strftime('%Y-%m-%d %H:%M:%S %z'),
+            iterationEncoding=iteration_encoding,
+            iterationFormat=iteration_format,
+            meshesPath='fields/',
+            particlesPath='particles/',
+            openPMD='1.1.0',
             openPMDextension=np.uint32(1),
-            software=np.string_('PLEXsim Initializer'),
-            softwareVersion=np.string_('1'),
-            _geometry=np.string_(self.coordinate_system)
+            software='PLEXsim Initializer',
+            softwareVersion='1',
+            _geometry=self.coordinate_system
         )
 
-        self.write_settings(h5f, root_attrs)
+        self.write_settings(zarr_group, root_attrs)
 
-        settings = h5f.require_group('settings')
+        settings = zarr_group.require_group('settings')
         self.write_settings(settings, self.env_attrs)
         settings.create_dataset('gilbert_curve',
                                 data=np.array(self.gilbert_curve),
@@ -269,13 +274,13 @@ class BaseInitializer:
             settings.create_dataset(
                 'vacuum_cell_mask', data=np.array(self.vacuum_cell_mask))
 
-    def base_path(self, h5f, iteration):
-        return np.string_(h5f.attrs['basePath']).replace(
-            b'%T', np.string_(str(iteration)))
+    def base_path(self, zarr_group, iteration):
+        return zarr_group.attrs['basePath'].replace(
+            '%T', str(iteration))
 
-    def setup_base_path(self, h5f, iteration=0, delta_time=1):
-        base_path = self.base_path(h5f, iteration)
-        base = h5f.require_group(base_path)
+    def setup_base_path(self, zarr_group, iteration=0, delta_time=1):
+        base_path = self.base_path(zarr_group, iteration)
+        base = zarr_group.require_group(base_path)
 
         base_attrs = dict(
             time=np.float64(iteration),
@@ -313,19 +318,19 @@ class BaseInitializer:
         else:
             NotImplementedError()
 
-    def setup_fields(self, h5f, iteration=0):
-        fields_path = self.base_path(h5f, iteration) \
-            + np.string_(h5f.attrs['meshesPath'])
-        fields = h5f.require_group(fields_path)
+    def setup_fields(self, zarr_group, iteration=0):
+        fields_path = self.base_path(zarr_group, iteration) \
+            + zarr_group.attrs['meshesPath']
+        fields = zarr_group.require_group(fields_path)
 
         dimension = len(self.grid_shape)
 
         fields_attrs = dict(
-            fieldSolver=np.string_('none'),
-            fieldBoundary=np.full(2 * dimension, np.string_('open')),
-            particleBoundary=np.full(2 * dimension, np.string_('absorbing')),
-            currentSmoothing=np.string_('none'),
-            chargeCorrection=np.string_('none')
+            fieldSolver='none',
+            fieldBoundary=list(np.full(2 * dimension, 'open')),
+            particleBoundary=list(np.full(2 * dimension, 'absorbing')),
+            currentSmoothing='none',
+            chargeCorrection='none'
         )
 
         self.write_settings(fields, fields_attrs)
@@ -354,7 +359,7 @@ class BaseInitializer:
             self.B_induced[tuple(
                 axis for axis in self.constant_induced_field_center.T)] = 0
 
-        settings = h5f.require_group('settings')
+        settings = zarr_group.require_group('settings')
         settings.create_dataset(
             'B_fixed', data=np.array(self.B_external + self.B_induced))
 
@@ -396,8 +401,8 @@ class BaseInitializer:
         raise NotImplementedError()
 
     def write_B(self, fields_group):
-        B_group = fields_group.require_group(np.string_('B'))
-        B_induced_group = fields_group.require_group(np.string_('B_induced'))
+        B_group = fields_group.require_group('B')
+        B_induced_group = fields_group.require_group('B_induced')
 
         B_attrs = self.B_attrs
 
@@ -405,44 +410,39 @@ class BaseInitializer:
         self.write_settings(B_induced_group, B_attrs)
 
         B = self.B_external + self.B_induced
-        axis_labels = [np.string_(v) for v in self.axis_labels]
+        axis_labels = self.axis_labels
         dimension = len(self.grid_shape)
         for i, axis in enumerate(axis_labels):
             B_group.create_dataset(axis, data=B[..., i],
                                    **self.create_dataset_kwargs)
-            B_group[axis].attrs['position'] = np.zeros(
-                dimension, dtype=B.dtype)
-            B_group[axis].attrs['unitSI'] = np.float64(1)
+            B_group[axis].attrs['position'] = [0 for _ in range(dimension)]
+            B_group[axis].attrs['unitSI'] = 1.
 
             B_induced_group.create_dataset(axis, data=self.B_induced[..., i],
                                            **self.create_dataset_kwargs)
-            B_induced_group[axis].attrs['position'] = np.zeros(
-                dimension, dtype=self.B_induced.dtype)
-            B_induced_group[axis].attrs['unitSI'] = np.float64(1)
+            B_induced_group[axis].attrs['position'] = [0 for _ in range(dimension)]
+            B_induced_group[axis].attrs['unitSI'] = 1.
 
     def write_E(self, fields_group):
-        E_group = fields_group.require_group(np.string_('E'))
-        E_induced_group = fields_group.require_group(np.string_('E_induced'))
+        E_group = fields_group.require_group('E')
+        E_induced_group = fields_group.require_group('E_induced')
 
         E_attrs = self.E_attrs
         self.write_settings(E_group, E_attrs)
         self.write_settings(E_induced_group, E_attrs)
 
         E = self.E_external + self.E_induced
-        axis_labels = [np.string_(v) for v in self.axis_labels]
+        axis_labels = self.axis_labels
         dimension = len(self.grid_shape)
         for i, axis in enumerate(axis_labels):
             E_group.create_dataset(axis, data=E[..., i],
                                    **self.create_dataset_kwargs)
-            E_group[axis].attrs['position'] = np.zeros(
-                dimension, dtype=E.dtype)
-            E_group[axis].attrs['unitSI'] = np.float64(1)
-
+            E_group[axis].attrs['position'] = [0 for _ in range(dimension)]
+            E_group[axis].attrs['unitSI'] = 1.
             E_induced_group.create_dataset(axis, data=self.E_induced[..., i],
                                            **self.create_dataset_kwargs)
-            E_induced_group[axis].attrs['position'] = np.zeros(
-                dimension, dtype=self.E_induced.dtype)
-            E_induced_group[axis].attrs['unitSI'] = np.float64(1)
+            E_induced_group[axis].attrs['position'] = [0 for _ in range(dimension)]
+            E_induced_group[axis].attrs['unitSI'] = 1.
 
     def write_J(self, fields_group):
         raise NotImplementedError()
@@ -493,33 +493,33 @@ class BaseInitializer:
     def get_particle_attrs(self, n_particles, q, m):
         charge_attrs = dict(
             value=q,
-            shape=np.array([n_particles], dtype=np.uint64),
-            macroWeighted=np.uint32(1),
+            shape=[n_particles],
+            macroWeighted=1,
             weightingPower=1.,
             timeOffset=0.,
-            unitSI=np.float64(1),
-            unitDimension=np.array([0, 0, 1, 1, 0, 0, 0], dtype=np.float64)
+            unitSI=1.,
+            unitDimension=[0, 0, 1, 1, 0, 0, 0]
         )
         mass_attrs = dict(
             value=m,
-            shape=np.array([n_particles], dtype=np.uint64),
-            macroWeighted=np.uint32(1),
+            shape=[n_particles],
+            macroWeighted=1,
             weightingPower=1.,
             timeOffset=0.,
-            unitSI=np.float64(1),
-            unitDimension=np.array([0, 1, 0, 0, 0, 0, 0], dtype=np.float64)
+            unitSI=1.,
+            unitDimension=[0, 1, 0, 0, 0, 0, 0]
         )
         position_attrs = dict(
-            macroWeighted=np.uint32(1),
+            macroWeighted=1,
             weightingPower=0.,
             timeOffset=0.,
-            unitDimension=np.array([1, 0, 0, 0, 0, 0, 0], dtype=np.float64)
+            unitDimension=[1, 0, 0, 0, 0, 0, 0]
         )
         momentum_attrs = dict(
-            macroWeighted=np.uint32(1),
+            macroWeighted=1,
             weightingPower=0.,
             timeOffset=0.,
-            unitDimension=np.array([1, 1, -1, 0, 0, 0, 0], dtype=np.float64),
+            unitDimension=[1, 1, -1, 0, 0, 0, 0]
         )
 
         return dict(
@@ -536,7 +536,7 @@ class BaseInitializer:
     def write_particle_patches_offset(self, patches, n_splits):
         raise NotImplementedError()
 
-    def write_particle_attrs(self, h5_group, particle_data, n_splits,
+    def write_particle_attrs(self, zarr_group, particle_data, n_splits,
                              n_computational_to_physical, dtype_X, dtype_U):
         n_particles = particle_data['n_particles']
         q = particle_data['q']
@@ -554,10 +554,10 @@ class BaseInitializer:
 
         grid_attrs = dict(
             particleShape=3.0,
-            currentDeposition=np.string_('none'),
-            particlePush=np.string_('Boris'),
-            particleInterpolation=np.string_('uniform'),
-            particleSmoothing=np.string_('none'),
+            currentDeposition='none',
+            particlePush='Boris',
+            particleInterpolation='uniform',
+            particleSmoothing='none',
             **particles_attrs,
             _startIndices=start_indices,
             _endIndices=end_indices,
@@ -566,32 +566,30 @@ class BaseInitializer:
             _is_cell_sorted=True
         )
 
-        self.write_settings(h5_group, grid_attrs)
+        self.write_settings(zarr_group, grid_attrs)
 
-        h5_group.create_dataset('_gilbert_n_particles',
-                                data=gilbert_n_particles,
-                                dtype=np.uint64)
+        zarr_group.create_dataset('_gilbert_n_particles',
+                                  data=gilbert_n_particles,
+                                  dtype=np.uint64)
 
-        patches = h5_group.require_group('particlePatches')
+        patches = zarr_group.require_group('particlePatches')
         patches.create_dataset('numParticles',
                                data=end_p_indices - start_p_indices + 1,
                                dtype=np.uint64)
-        patches['numParticles'].attrs['unitSI'] = np.float64(1)
+        patches['numParticles'].attrs['unitSI'] = 1.
         patches.create_dataset('numParticlesOffset',
                                data=start_p_indices,
                                dtype=np.uint64)
-        patches['numParticlesOffset'].attrs['unitSI'] = np.float64(1)
+        patches['numParticlesOffset'].attrs['unitSI'] = 1.
 
         self.write_particle_patches_offset(patches, n_splits)
 
         patches.require_group('extent')
-        patches['extent'].attrs['unitDimension'] = np.array(
-            [1, 0, 0, 0, 0, 0, 0], dtype=np.float64)
+        patches['extent'].attrs['unitDimension'] = [1, 0, 0, 0, 0, 0, 0]
         for i, axis in enumerate(self.axis_labels):
             patches['extent'].create_dataset(
                 axis, data=np.full(n_splits, self.grid_shape[i]))
-            patches[f'extent/{axis}'].attrs['unitSI'] = \
-                np.float64(self.cell_size[i])
+            patches[f'extent/{axis}'].attrs['unitSI'] = self.cell_size[i]
 
         weighting_attrs = dict(
             macroWeighted=np.uint32(1),
@@ -604,35 +602,39 @@ class BaseInitializer:
         _create_dataset_kwargs = self.create_dataset_kwargs.copy()
         if n_particles > self.chunk_size * 2:
             _create_dataset_kwargs['chunks'] = (self.chunk_size,)
-        h5_group.create_dataset('weighting', (n_particles,),
-                                dtype=np.uint64,
-                                **_create_dataset_kwargs)
-        h5_group['weighting'][:] = n_computational_to_physical
-        self.write_settings(h5_group['weighting'], weighting_attrs)
+        zarr_group.create_dataset('weighting', shape=(n_particles,),
+                                  dtype=np.uint64,
+                                  **_create_dataset_kwargs)
+        zarr_group['weighting'][:] = n_computational_to_physical
+        self.write_settings(zarr_group['weighting'], weighting_attrs)
 
-        # create dataset with size (n + 1,) for MPI collective serialization
+        # create dataset with size (n,) since format change to zarr
+        # Not n + 1, for h5py MPI collective serialization
         _create_dataset_kwargs = self.create_dataset_kwargs.copy()
         avg_n_particles = n_particles / len(self.gilbert_curve)
         if avg_n_particles > self.chunk_size * 2:
             _create_dataset_kwargs['chunks'] = (self.chunk_size,)
-        for i, axis in enumerate(self.axis_labels):
-            # X
-            _path = f'position/{axis}'
-            h5_group.create_dataset(_path, (n_particles + 1, ),
-                                    dtype=dtype_X,
-                                    **_create_dataset_kwargs)
-            h5_group[_path].attrs['unitSI'] = np.float64(self.cell_size[i])
+        for j, coord in enumerate(self.gilbert_curve):
+            coord_name = '_'.join([str(c) for c in coord])
+            _n_particles = gilbert_n_particles[j]
+            for i, axis in enumerate(self.axis_labels):
+                # X
+                _path = f'position/{coord_name}/{axis}'
+                zarr_group.create_dataset(_path, shape=(_n_particles, ),
+                                          dtype=dtype_X,
+                                          **_create_dataset_kwargs)
+                zarr_group[_path].attrs['unitSI'] = self.cell_size[i]
 
-            # U
-            _path = f'momentum/{axis}'
-            h5_group.create_dataset(_path, (n_particles + 1, ),
-                                    dtype=dtype_U,
-                                    **_create_dataset_kwargs)
-            h5_group[_path].attrs['unitSI'] = np.float64(m)
+                # U
+                _path = f'momentum/{coord_name}/{axis}'
+                zarr_group.create_dataset(_path, shape=(_n_particles, ),
+                                          dtype=dtype_U,
+                                          **_create_dataset_kwargs)
+                zarr_group[_path].attrs['unitSI'] = m
 
     def serialize_tracked(self, tracked_group, grid_index, n_track_particles,
                           q, m, n_computational_to_physical, n_particles,
-                          tracking_start_id, particle_group):
+                          tracking_start_id, particle_group, particle_data):
         # custom attribute
         tracked_group.attrs['_gridIndex'] = grid_index
         tracked_group.attrs['_tracked'] = 1
@@ -640,10 +642,10 @@ class BaseInitializer:
         tracked_attrs = self.get_particle_attrs(n_track_particles, q, m)
         tracked_attrs.update(dict(
             particleShape=3.0,
-            currentDeposition=np.string_('none'),
-            particlePush=np.string_('Boris'),
-            particleInterpolation=np.string_('uniform'),
-            particleSmoothing=np.string_('none')))
+            currentDeposition='none',
+            particlePush='Boris',
+            particleInterpolation='uniform',
+            particleSmoothing='none'))
 
         self.write_settings(tracked_group, tracked_attrs)
 
@@ -659,7 +661,7 @@ class BaseInitializer:
         if n_track_particles > self.chunk_size * 2:
             _create_dataset_kwargs['chunks'] = (self.chunk_size,)
         tracked_group.create_dataset(
-            'weighting', (n_track_particles,), dtype=np.uint64,
+            'weighting', shape=(n_track_particles,), dtype=np.uint64,
             **_create_dataset_kwargs)
         tracked_group['weighting'][:] = n_computational_to_physical
         self.write_settings(tracked_group['weighting'],
@@ -673,33 +675,51 @@ class BaseInitializer:
             tracking_start_id + n_track_particles,
             dtype=np.uint64)
 
-        tracked_group.attrs['_particleIndices'] = particle_indices
+        tracked_group.attrs['_particleIndices'] = list(particle_indices)
         tracked_group.create_dataset('id', data=tracking_ids)
         id_attr = dict(
-            unitSI=np.float64(1),
-            macroWeighted=np.uint32(1),
-            timeOffset=np.float64(0),
-            unitDimension=np.zeros(7, dtype=np.float64),
-            weightingPower=np.float64(0)
+            unitSI=1.,
+            macroWeighted=1,
+            timeOffset=0.,
+            unitDimension=list(np.zeros(7, dtype=np.float64)),
+            weightingPower=0.
         )
         self.write_settings(tracked_group['id'], id_attr)
 
+        gilbert_n_particles = particle_data['gilbert_n_particles']
+        cumsum = np.cumsum(gilbert_n_particles)
+        _particle_indices = []
+        for idx in particle_indices:
+            cell_idx = np.searchsorted(cumsum, idx, side='right')
+            if cell_idx == 0:
+                local_idx = idx
+            else:
+                local_idx = int(idx - cumsum[cell_idx - 1])
+            _particle_indices.append((cell_idx, local_idx))
+
         for i, axis in enumerate(self.axis_labels):
             # X
+            X = []
+            for cell_idx, local_idx in _particle_indices:
+                coord = self.gilbert_curve[cell_idx]
+                coord_name = '_'.join(str(x) for x in coord)
+                X.append(particle_group[f'position/{coord_name}/{axis}'][local_idx])
             _path = f'position/{axis}'
-            X = particle_group[_path]
-            tracked_group.create_dataset(_path, data=X[list(particle_indices)],
+            tracked_group.create_dataset(_path, data=X,
                                          **_create_dataset_kwargs)
-            tracked_group[_path].attrs['unitSI'] = \
-                np.float64(self.cell_size[i])
+            tracked_group[_path].attrs['unitSI'] = self.cell_size[i]
 
             # U
             # velocity is saved as momentum (required by openPMD)
+            U = []
+            for cell_idx, local_idx in _particle_indices:
+                coord = self.gilbert_curve[cell_idx]
+                coord_name = '_'.join(str(x) for x in coord)
+                U.append(particle_group[f'momentum/{coord_name}/{axis}'][local_idx])
             _path = f'momentum/{axis}'
-            U = particle_group[_path]
-            tracked_group.create_dataset(_path, data=U[list(particle_indices)],
+            tracked_group.create_dataset(_path, data=U,
                                          **_create_dataset_kwargs)
-            tracked_group[_path].attrs['unitSI'] = np.float64(m)
+            tracked_group[_path].attrs['unitSI'] = m
 
     @property
     def magnetic_E(self):
@@ -720,12 +740,12 @@ class BaseInitializer:
             n_particles.append(grid['n_particles'])
             kinetic_E.append(grid.get('kinetic_E'))
 
-        stats_path = self.base_path(h5f, iteration) + np.string_('stats')
+        stats_path = self.base_path(h5f, iteration) + 'stats'
         stats_group = h5f.require_group(stats_path)
 
         stats_attrs = dict(
-            n_particles=np.array(n_particles),
-            kinetic_E=np.array(kinetic_E),
+            n_particles=n_particles,
+            kinetic_E=kinetic_E,
             electric_E=electric_E,
             induced_electric_E=induced_electric_E,
             magnetic_E=magnetic_E,
@@ -743,35 +763,33 @@ class BaseInitializer:
 
     def write_state(self, fields_group, particle_name, grid_n,
                     grid_U, grid_T):
-        axis_labels = np.array([np.string_(v) for v in self.axis_labels])
+        axis_labels = self.axis_labels
         n_attrs = dict(
-            geometry=np.string_(self.coordinate_system),
-            gridSpacing=self.cell_size,
-            gridGlobalOffset=self.grid_global_offset,
-            gridUnitSI=np.float64(1),
-            dataOrder=np.string_('C'),
+            geometry=self.coordinate_system,
+            gridSpacing=list(self.cell_size),
+            gridGlobalOffset=list(self.grid_global_offset),
+            gridUnitSI=1.,
+            dataOrder='C',
             axisLabels=axis_labels,
-            unitDimension=np.array(
-                [-3, 0, 0, 0, 0, 0, 0], dtype=np.float64),
-            fieldSmoothing=np.string_('none'),
+            unitDimension=[-3, 0, 0, 0, 0, 0, 0],
+            fieldSmoothing='none',
             timeOffset=0.,
-            position=np.array([0, 0, 0], dtype=np.float64),
-            unitSI=np.float64(1)
+            position=[0, 0, 0],
+            unitSI=1.
         )
         fields_group.create_dataset(f'{particle_name}_n', data=grid_n,
                                     **self.create_dataset_kwargs)
         self.write_settings(fields_group[f'{particle_name}_n'], n_attrs)
 
         T_attrs = dict(
-            geometry=np.string_(self.coordinate_system),
-            gridSpacing=self.cell_size,
-            gridGlobalOffset=self.grid_global_offset,
-            gridUnitSI=np.float64(1),
-            dataOrder=np.string_('C'),
+            geometry=self.coordinate_system,
+            gridSpacing=list(self.cell_size),
+            gridGlobalOffset=list(self.grid_global_offset),
+            gridUnitSI=1.,
+            dataOrder='C',
             axisLabels=axis_labels,
-            unitDimension=np.array(
-                [2, 1, -3, -1, 0, 0, 0], dtype=np.float64),
-            fieldSmoothing=np.string_('none'),
+            unitDimension=[2, 1, -3, -1, 0, 0, 0],
+            fieldSmoothing='none',
             timeOffset=0.
         )
         T_group = fields_group.require_group(f'{particle_name}_T')
@@ -779,26 +797,23 @@ class BaseInitializer:
         for i, axis in enumerate(axis_labels):
             T_group.create_dataset(axis, data=grid_T[..., i],
                                    **self.create_dataset_kwargs)
-            T_group[axis].attrs['position'] = \
-                np.array([0, 0, 0], dtype=np.float64)
-            T_group[axis].attrs['unitSI'] = np.float64(1)
+            T_group[axis].attrs['position'] = [0, 0, 0]
+            T_group[axis].attrs['unitSI'] = 1.
 
         T_group.create_dataset('mean', data=grid_T.mean(axis=-1),
                                **self.create_dataset_kwargs)
-        T_group['mean'].attrs['position'] = \
-            np.array([0, 0, 0], dtype=np.float64)
-        T_group['mean'].attrs['unitSI'] = np.float64(1)
+        T_group['mean'].attrs['position'] = [0, 0, 0]
+        T_group['mean'].attrs['unitSI'] = 1.
 
         U_attrs = dict(
-            geometry=np.string_(self.coordinate_system),
-            gridSpacing=self.cell_size,
-            gridGlobalOffset=self.grid_global_offset,
-            gridUnitSI=np.float64(1),
-            dataOrder=np.string_('C'),
+            geometry=self.coordinate_system,
+            gridSpacing=list(self.cell_size),
+            gridGlobalOffset=list(self.grid_global_offset),
+            gridUnitSI=1.,
+            dataOrder='C',
             axisLabels=axis_labels,
-            unitDimension=np.array(
-                [1, 0, -1, 0, 0, 0, 0], dtype=np.float64),
-            fieldSmoothing=np.string_('none'),
+            unitDimension=[1, 0, -1, 0, 0, 0, 0],
+            fieldSmoothing='none',
             timeOffset=0.,
         )
         U_group = fields_group.require_group(f'{particle_name}_U')
@@ -806,9 +821,8 @@ class BaseInitializer:
         for i, axis in enumerate(axis_labels):
             U_group.create_dataset(axis, data=grid_U[..., i],
                                    **self.create_dataset_kwargs)
-            U_group[axis].attrs['position'] = np.array([0, 0, 0],
-                                                       dtype=np.float64)
-            U_group[axis].attrs['unitSI'] = np.float64(1)
+            U_group[axis].attrs['position'] = [0, 0, 0]
+            U_group[axis].attrs['unitSI'] = 1.
 
     def setup_state(self, h5f, iteration=0, density_threshold=1e-10,
                     _e=1.602e-19, _m=9.1093837e-31, c=2.99792458e8):
