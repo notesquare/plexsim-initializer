@@ -1,0 +1,54 @@
+initializer: maxwellian
+
+environment:
+  coordinate_system: cylindrical
+  grid_shape: [197, 148, 30]
+  cell_size: [0.037376181633761815, 0.0282252464970958]
+  scale_length: 1.
+  r0: 0.48351074434155406
+  external_magnetic_field: [0, 0, 0]
+  external_electric_field: [0, 0, 0]
+  induced_magnetic_field: ./data/input-cylindrical-39915-upscale-halfT-nz198/B_cyl.npy
+  induced_electric_field: [0, 0, 0]
+  vacuum_current_density: ./data/input-cylindrical-39915-upscale-halfT-nz198/J_ext_yee.npy
+  vacuum_cell_mask: ./data/input-cylindrical-39915-upscale-halfT-nz198/LCFS_bool.npy
+  field_dtype: fp64
+  relative_permittivity: 1
+  relative_permeability: 1
+
+grids:
+  -
+    species: electron
+    dtype:
+      X: fp64
+      U: fp64
+    n_splits: 2
+    n_computational_to_physical: 2.31e+10
+    initial_condition:
+      temperature: ./data/input-cylindrical-39915-upscale-halfT-nz198/Te.npy  # [eV]
+      density: ./data/input-cylindrical-39915-upscale-halfT-nz198/ne.npy  # [m^-3]
+      current_density: ./data/input-cylindrical-39915-upscale-halfT-nz198/J_e.npy
+      tracking:
+        n_particles: 100
+        sample: random
+
+  # -
+  #   species: ion
+  #   dtype:
+  #     X: fp64
+  #     U: fp64
+  #   n_splits: 2
+  #   n_computational_to_physical: 2.31e+10
+  #   initial_condition:
+  #     temperature: ./data/input-cylindrical-39915-upscale-halfT-nz198/Ti.npy  # [eV]
+  #     density: ./data/input-cylindrical-39915-upscale-halfT-nz198/ni.npy  # [m^-3]
+  #     current_density: ./data/input-cylindrical-39915-upscale-halfT-nz198/J_i.npy
+  #     tracking:
+  #       n_particles: 100
+  #       sample: random
+
+simulation:
+  backend: mpi
+  chunk_size: 1.e+6
+  iteration_encoding: file
+  save_state: No
