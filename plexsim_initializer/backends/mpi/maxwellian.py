@@ -69,19 +69,20 @@ def distribute_and_serialize(
     else:
         U2 = 0
 
-    coord_name = '_'.join(str(x) for x in cell_coords)
-    for i, axis in enumerate(axis_labels):
-        # X
-        _path = f'{prefix}/position/{coord_name}/{axis}'
-        X_i = zarr_store[_path]
-        if is_exist:
-            X_i[:] = X[:, i]
+    if cell_coords is not None:
+        coord_name = '_'.join(str(x) for x in cell_coords)
+        for i, axis in enumerate(axis_labels):
+            # X
+            _path = f'{prefix}/position/{coord_name}/{axis}'
+            X_i = zarr_store[_path]
+            if is_exist:
+                X_i[:] = X[:, i]
 
-        # U
-        _path = f'{prefix}/momentum/{coord_name}/{axis}'
-        U_i = zarr_store[_path]
-        if is_exist:
-            U_i[:] = U[:, i]
+            # U
+            _path = f'{prefix}/momentum/{coord_name}/{axis}'
+            U_i = zarr_store[_path]
+            if is_exist:
+                U_i[:] = U[:, i]
 
     return U2
 
